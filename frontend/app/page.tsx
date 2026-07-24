@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { api, clearToken, getToken, type Workspace } from "@/lib/api";
 
@@ -35,7 +36,8 @@ export default function Home() {
   if (!workspace) return null;
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-8">
+    <main className="relative flex min-h-screen items-center justify-center p-8">
+      <ThemeToggle className="absolute top-6 right-6 inline-flex size-9 items-center justify-center rounded-md text-slate transition-colors hover:bg-black/[0.04] hover:text-ink" />
       <div className="text-center">
         <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink">
           Welcome, {workspace.name}

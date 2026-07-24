@@ -28,6 +28,10 @@ class Workspace(Base):
     objectives_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     country: Mapped[str | None] = mapped_column(Text, nullable=True)
     market: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The business's own site — doubles as future context for AI (and later
+    # a seed for the "AI reads your own site to build your catalog" import
+    # path), not just a display field.
+    website: Mapped[str | None] = mapped_column(Text, nullable=True)
     report_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(

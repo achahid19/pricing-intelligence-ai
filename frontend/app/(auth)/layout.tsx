@@ -1,3 +1,5 @@
+import { ThemeToggle } from "@/components/ThemeToggle";
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
@@ -15,7 +17,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
         <p className="text-xs text-white/40">© 2026 Pricing Intelligence AI</p>
       </div>
-      <div className="flex items-center justify-center p-8">
+      <div className="relative flex items-center justify-center p-8">
+        <ThemeToggle className="absolute top-6 right-6 inline-flex size-9 items-center justify-center rounded-md text-slate transition-colors hover:bg-black/[0.04] hover:text-ink" />
         <div className="w-full max-w-sm">{children}</div>
       </div>
     </div>

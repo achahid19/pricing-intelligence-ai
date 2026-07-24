@@ -8,7 +8,12 @@ Provider = Literal["openai", "google", "anthropic"]
 # Known checkbox options shown at onboarding — deliberately not a hard
 # enum, "anything else" is captured in objectives_note instead of forcing
 # a code change to add a new one. See DECISIONS.md.
-KNOWN_OBJECTIVES = ["market_research", "price_alignment", "product_fit"]
+# "map_compliance" (not "product_fit") on purpose — brands monitoring
+# reseller MAP violations is a real, already-validated use case from the
+# prior platform and one of this product's three named target segments;
+# "product-fit validation" was a weaker match for what Discovery/Reporting
+# actually deliver.
+KNOWN_OBJECTIVES = ["market_research", "price_alignment", "map_compliance"]
 
 
 class WorkspaceOut(BaseModel):
@@ -18,6 +23,7 @@ class WorkspaceOut(BaseModel):
     objectives_note: Optional[str]
     country: Optional[str]
     market: Optional[str]
+    website: Optional[str]
     report_interval_hours: Optional[int]
     onboarding_completed: bool
     created_at: datetime
@@ -30,6 +36,10 @@ class WorkspaceContextUpdate(BaseModel):
     objectives_note: Optional[str] = Field(default=None, max_length=2000)
     country: Optional[str] = Field(default=None, max_length=100)
     market: Optional[str] = Field(default=None, max_length=200)
+    # Plain string, not a strict URL type — a bare domain ("acme.com") is a
+    # valid, common thing to type here and shouldn't be rejected. Normalize
+    # (add https://, etc.) at the point this is actually crawled, not here.
+    website: Optional[str] = Field(default=None, max_length=300)
     report_interval_hours: Optional[int] = Field(default=None, ge=1, le=168)
 
 

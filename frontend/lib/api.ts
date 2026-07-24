@@ -68,6 +68,7 @@ export interface Workspace {
   objectives_note: string | null;
   country: string | null;
   market: string | null;
+  website: string | null;
   report_interval_hours: number | null;
   onboarding_completed: boolean;
   created_at: string;
@@ -78,13 +79,26 @@ export interface WorkspaceContextUpdate {
   objectives_note?: string | null;
   country?: string;
   market?: string | null;
+  website?: string | null;
   report_interval_hours?: number | null;
 }
 
-export const KNOWN_OBJECTIVES: { value: string; label: string }[] = [
-  { value: "market_research", label: "Market research" },
-  { value: "price_alignment", label: "Price alignment" },
-  { value: "product_fit", label: "Product-fit validation" },
+export const KNOWN_OBJECTIVES: { value: string; label: string; description: string }[] = [
+  {
+    value: "market_research",
+    label: "Market research",
+    description: "See who your competitors are, what they sell, and how they're positioned — no price tracking required.",
+  },
+  {
+    value: "price_alignment",
+    label: "Price alignment",
+    description: "Compare your prices against competitors on an ongoing basis and get alerted when you're out of line.",
+  },
+  {
+    value: "map_compliance",
+    label: "Reseller pricing compliance (MAP)",
+    description: "Monitor whether resellers are advertising below the minimum price you've set for them.",
+  },
 ];
 
 export const api = {
