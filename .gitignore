@@ -40,6 +40,10 @@ docker-data/
 # ── Database backups (local only) ───────────────────────────
 backups/
 
+# ── Project docs (local dev reference only, not for the remote) ──
+CLAUDE.md
+docs/
+
 # ── Misc ─────────────────────────────────────────────────────
 *.log
 *.tmp
