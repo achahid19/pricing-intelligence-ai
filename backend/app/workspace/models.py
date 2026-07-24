@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -11,14 +12,24 @@ class Workspace(Base):
     The tenant. One Workspace : one User for now (see DECISIONS.md) —
     multi-user teams are a clean later extension, not built yet.
 
-    Business-context fields (objectives, country, market, report_interval)
-    are added in a later migration once the onboarding capture UI (Step 3)
-    actually needs them — no point carrying empty columns before that.
+    Business-context fields below are deliberately all nullable — a
+    freshly-signed-up workspace has none of them set, and the onboarding
+    flow (Step 3) is exactly what fills them in. `objectives_selected` is a
+    JSON list rather than an enum column on purpose (see DECISIONS.md):
+    stays open-ended as new objectives emerge, no migration needed to add
+    one.
     """
     __tablename__ = "workspaces"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+
+    objectives_selected: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    objectives_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    country: Mapped[str | None] = mapped_column(Text, nullable=True)
+    market: Mapped[str | None] = mapped_column(Text, nullable=True)
+    report_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -26,6 +37,13 @@ class Workspace(Base):
     ai_provider_configs: Mapped[list["AiProviderConfig"]] = relationship(
         back_populates="workspace", cascade="all, delete-orphan"
     )
+
+    @property
+    def onboarding_completed(self) -> bool:
+        """Onboarding is done once there's at least one objective and a
+        country — the two fields discovery/reports actually key off of.
+        market/notes stay optional even after onboarding."""
+        return bool(self.objectives_selected) and bool(self.country)
 
 
 class AiProviderConfig(Base):

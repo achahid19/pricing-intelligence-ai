@@ -6,13 +6,31 @@ from app.auth.dependencies import get_current_workspace
 from app.db.database import get_db
 from app.workspace.encryption import encrypt_key
 from app.workspace.models import AiProviderConfig, Workspace
-from app.workspace.schemas import AiProviderConfigCreate, AiProviderConfigOut, WorkspaceOut
+from app.workspace.schemas import (
+    AiProviderConfigCreate,
+    AiProviderConfigOut,
+    WorkspaceContextUpdate,
+    WorkspaceOut,
+)
 
 router = APIRouter()
 
 
 @router.get("/me", response_model=WorkspaceOut)
 async def get_my_workspace(workspace: Workspace = Depends(get_current_workspace)):
+    return workspace
+
+
+@router.patch("/me", response_model=WorkspaceOut)
+async def update_my_workspace(
+    payload: WorkspaceContextUpdate,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(workspace, field, value)
+    await db.commit()
+    await db.refresh(workspace)
     return workspace
 
 

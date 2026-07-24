@@ -1,1 +1,100 @@
 @import "tailwindcss";
+
+/*
+  Design tokens for Pricing Intelligence AI. Deliberately not the old
+  ai_crafters_pfa repo's teal/shadcn-default palette — a fresh, considered
+  identity for a new product. Cool, analytical mood befitting a market-
+  intelligence tool, not a playful consumer app.
+
+  panel  — fixed dark brand surface (e.g. the auth-screen marketing panel)
+           — stays the same dark color in BOTH themes, a deliberate choice,
+           not theme-adaptive. Text on it is always white.
+  ink    — body text color — MUST invert between themes (dark-on-light in
+           light mode, light-on-dark in dark mode) or it disappears against
+           its own background. Never conflate this with `panel`.
+  paper  — page background — light mode: cool off-white; dark mode: near-black
+  accent — burnt rust, confident and distinct from generic SaaS blue/purple
+  slate  — muted secondary text/borders
+  good/danger — semantic states, deliberately separate from the accent hue
+*/
+:root {
+  --panel: #1b1f2a;
+  --ink: #1b1f2a;
+  --ink-soft: #3a4152;
+  --paper: #f5f6f8;
+  --paper-raised: #ffffff;
+  --accent: #c2410c;
+  --accent-hover: #9a3412;
+  --slate: #5b6472;
+  --slate-soft: #8b93a1;
+  --border: #e2e4e9;
+  --good: #15803d;
+  --danger: #dc2626;
+}
+
+@theme inline {
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-slate: var(--slate);
+  --color-slate-soft: var(--slate-soft);
+  --color-border: var(--border);
+  --color-good: var(--good);
+  --color-danger: var(--danger);
+  --font-display: var(--font-instrument-sans);
+  --font-body: var(--font-plex-sans);
+  --font-data: var(--font-plex-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* --panel intentionally NOT overridden — stays dark in both themes */
+    --ink: #e7e8ec;
+    --ink-soft: #b7bcc7;
+    --paper: #14161c;
+    --paper-raised: #1e212b;
+    --accent: #e05d2b;
+    --accent-hover: #f0713f;
+    --slate: #9aa2b1;
+    --slate-soft: #6b7280;
+    --border: #2a2e38;
+    --good: #22c55e;
+    --danger: #f87171;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ink: #e7e8ec;
+  --ink-soft: #b7bcc7;
+  --paper: #14161c;
+  --paper-raised: #1e212b;
+  --accent: #e05d2b;
+  --accent-hover: #f0713f;
+  --slate: #9aa2b1;
+  --slate-soft: #6b7280;
+  --border: #2a2e38;
+  --good: #22c55e;
+  --danger: #f87171;
+}
+
+:root[data-theme="light"] {
+  --ink: #1b1f2a;
+  --ink-soft: #3a4152;
+  --paper: #f5f6f8;
+  --paper-raised: #ffffff;
+  --accent: #c2410c;
+  --accent-hover: #9a3412;
+  --slate: #5b6472;
+  --slate-soft: #8b93a1;
+  --border: #e2e4e9;
+  --good: #15803d;
+  --danger: #dc2626;
+}
+
+body {
+  font-family: var(--font-body);
+}
