@@ -15,7 +15,7 @@ from app.config import settings
 # so Base.metadata is fully populated before autogenerate/migrations run.
 from app.auth import models as auth_models  # noqa: F401
 from app.workspace import models as workspace_models  # noqa: F401
-# from app.catalog import models as catalog_models  # noqa: F401
+from app.catalog import models as catalog_models  # noqa: F401
 # from app.discovery import models as discovery_models  # noqa: F401
 # from app.reporting import models as reporting_models  # noqa: F401
 

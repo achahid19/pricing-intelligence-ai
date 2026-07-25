@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
+from app.catalog.router import router as catalog_router
 from app.config import settings
 from app.workspace.router import router as workspace_router
 
@@ -29,6 +30,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(workspace_router, prefix="/api/v1/workspace", tags=["workspace"])
+app.include_router(catalog_router, prefix="/api/v1/products", tags=["catalog"])
 
 
 @app.get("/health")

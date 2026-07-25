@@ -101,6 +101,40 @@ export const KNOWN_OBJECTIVES: { value: string; label: string; description: stri
   },
 ];
 
+export interface Product {
+  id: number;
+  name: string;
+  price: string;
+  currency: string;
+  image_url: string | null;
+  description: string | null;
+  sku: string | null;
+  brand: string | null;
+  category: string | null;
+  barcode: string | null;
+  import_source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductCreate {
+  name: string;
+  price: number;
+  currency?: string;
+  image_url?: string | null;
+  description?: string | null;
+  sku?: string | null;
+  brand?: string | null;
+  category?: string | null;
+  barcode?: string | null;
+}
+
+export interface ImportResult {
+  created: number;
+  skipped: string[];
+  errors: string[];
+}
+
 export const api = {
   auth: {
     async signup(email: string, password: string, workspaceName: string) {
@@ -124,5 +158,31 @@ export const api = {
     me: () => request<Workspace>("/workspace/me"),
     updateContext: (payload: WorkspaceContextUpdate) =>
       request<Workspace>("/workspace/me", { method: "PATCH", body: JSON.stringify(payload) }),
+  },
+  products: {
+    list: () => request<Product[]>("/products"),
+    create: (payload: ProductCreate) =>
+      request<Product>("/products", { method: "POST", body: JSON.stringify(payload) }),
+    update: (id: number, payload: Partial<ProductCreate>) =>
+      request<Product>(`/products/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    delete: (id: number) => request<void>(`/products/${id}`, { method: "DELETE" }),
+    async importFile(file: File): Promise<ImportResult> {
+      // Bypasses the shared request() helper — it always sets
+      // Content-Type: application/json, but a multipart upload needs the
+      // browser to set its own Content-Type with the correct boundary.
+      const token = getToken();
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/v1/products/import", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(res.status, typeof body.detail === "string" ? body.detail : res.statusText);
+      }
+      return res.json();
+    },
   },
 };
