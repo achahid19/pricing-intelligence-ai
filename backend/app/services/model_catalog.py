@@ -25,10 +25,34 @@ class ModelInfo(TypedDict, total=False):
 MODEL_CATALOG: dict[str, list[ModelInfo]] = {
     "openai": [
         {
+            "id": "gpt-4.1-nano",
+            "label": "GPT-4.1 Nano",
+            "tier": "low",
+            "blurb": "The cheapest OpenAI model available — simple classification, tagging.",
+        },
+        {
+            "id": "gpt-4o-mini",
+            "label": "GPT-4o Mini",
+            "tier": "low",
+            "blurb": "Small, fast, well-known — good default for lightweight tasks.",
+        },
+        {
             "id": "gpt-5.6-luna",
             "label": "GPT-5.6 Luna",
             "tier": "low",
-            "blurb": "Fastest, cheapest tier — good for high-volume extraction tasks.",
+            "blurb": "Fastest of the current GPT-5.6 family — high-volume extraction.",
+        },
+        {
+            "id": "gpt-4o",
+            "label": "GPT-4o",
+            "tier": "medium",
+            "blurb": "OpenAI's widely-used multimodal workhorse.",
+        },
+        {
+            "id": "o3",
+            "label": "o3",
+            "tier": "medium",
+            "blurb": "Reasoning-focused model — multi-step analysis at moderate cost.",
         },
         {
             "id": "gpt-5.6-terra",
@@ -41,7 +65,13 @@ MODEL_CATALOG: dict[str, list[ModelInfo]] = {
             "id": "gpt-5.6-sol",
             "label": "GPT-5.6 Sol",
             "tier": "high",
-            "blurb": "Flagship tier — best reasoning, highest cost.",
+            "blurb": "Flagship GPT-5.6 tier — best reasoning, highest cost.",
+        },
+        {
+            "id": "o1",
+            "label": "o1",
+            "tier": "high",
+            "blurb": "Premium reasoning tier — the most expensive OpenAI option here.",
         },
     ],
     "google": [
@@ -49,7 +79,13 @@ MODEL_CATALOG: dict[str, list[ModelInfo]] = {
             "id": "gemini-3.1-flash-lite",
             "label": "Gemini 3.1 Flash-Lite",
             "tier": "low",
-            "blurb": "Cheapest Gemini tier.",
+            "blurb": "Cheapest current Gemini tier.",
+        },
+        {
+            "id": "gemini-3-flash",
+            "label": "Gemini 3 Flash",
+            "tier": "low",
+            "blurb": "Fast and cheap, a step up from Flash-Lite.",
         },
         {
             "id": "gemini-3.6-flash",
@@ -59,10 +95,22 @@ MODEL_CATALOG: dict[str, list[ModelInfo]] = {
             "default": True,
         },
         {
+            "id": "gemini-3.5-flash",
+            "label": "Gemini 3.5 Flash",
+            "tier": "medium",
+            "blurb": "Previous-generation Flash — similar cost to 3.6.",
+        },
+        {
+            "id": "gemini-2.5-pro",
+            "label": "Gemini 2.5 Pro",
+            "tier": "medium",
+            "blurb": "Older Pro-tier model, still widely used.",
+        },
+        {
             "id": "gemini-3.1-pro",
             "label": "Gemini 3.1 Pro",
             "tier": "high",
-            "blurb": "Higher-reasoning Gemini tier.",
+            "blurb": "Higher-reasoning Gemini tier, highest cost here.",
         },
     ],
     "anthropic": [
@@ -73,6 +121,12 @@ MODEL_CATALOG: dict[str, list[ModelInfo]] = {
             "blurb": "Fastest, cheapest Claude tier.",
         },
         {
+            "id": "claude-sonnet-4-5",
+            "label": "Claude Sonnet 4.5",
+            "tier": "medium",
+            "blurb": "Previous-generation Sonnet — still active and well known.",
+        },
+        {
             "id": "claude-sonnet-5",
             "label": "Claude Sonnet 5",
             "tier": "medium",
@@ -80,10 +134,22 @@ MODEL_CATALOG: dict[str, list[ModelInfo]] = {
             "default": True,
         },
         {
+            "id": "claude-opus-4-7",
+            "label": "Claude Opus 4.7",
+            "tier": "high",
+            "blurb": "Previous-generation Opus — highly capable, still active.",
+        },
+        {
             "id": "claude-opus-4-8",
             "label": "Claude Opus 4.8",
             "tier": "high",
-            "blurb": "Most capable Claude tier.",
+            "blurb": "Most capable current Opus tier.",
+        },
+        {
+            "id": "claude-fable-5",
+            "label": "Claude Fable 5",
+            "tier": "high",
+            "blurb": "Anthropic's most capable model overall — premium pricing to match.",
         },
     ],
     # OpenRouter proxies hundreds of models behind one key. This curated list
@@ -99,6 +165,18 @@ MODEL_CATALOG: dict[str, list[ModelInfo]] = {
             "blurb": "Open-weight model, lowest cost of any option here.",
         },
         {
+            "id": "deepseek/deepseek-v4-pro",
+            "label": "DeepSeek V4 Pro",
+            "tier": "low",
+            "blurb": "Stronger DeepSeek tier, still very cheap.",
+        },
+        {
+            "id": "meta-llama/llama-3.3-70b-instruct",
+            "label": "Llama 3.3 70B",
+            "tier": "low",
+            "blurb": "Well-known open-weight model, low cost.",
+        },
+        {
             "id": "google/gemini-3.6-flash",
             "label": "Gemini 3.6 Flash",
             "tier": "medium",
@@ -106,10 +184,22 @@ MODEL_CATALOG: dict[str, list[ModelInfo]] = {
             "default": True,
         },
         {
+            "id": "openai/gpt-5.6-terra",
+            "label": "GPT-5.6 Terra",
+            "tier": "medium",
+            "blurb": "Same model as the native OpenAI option, via OpenRouter's key.",
+        },
+        {
             "id": "anthropic/claude-sonnet-5",
             "label": "Claude Sonnet 5",
             "tier": "high",
             "blurb": "Higher-reasoning option, billed through the same OpenRouter key.",
+        },
+        {
+            "id": "anthropic/claude-opus-4-8",
+            "label": "Claude Opus 4.8",
+            "tier": "high",
+            "blurb": "Most capable option available through OpenRouter here.",
         },
     ],
 }

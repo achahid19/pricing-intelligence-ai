@@ -22,6 +22,8 @@ const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: "openrouter", label: "OpenRouter" },
 ];
 
+const TIER_ORDER: ModelTier[] = ["low", "medium", "high"];
+
 const TIER_LABEL: Record<ModelTier, string> = {
   low: "Low cost",
   medium: "Medium cost",
@@ -55,6 +57,10 @@ export default function SettingsPage() {
   const active = configs?.find((c) => c.is_active);
   const models = catalog?.[provider] ?? [];
   const defaultModel = models.find((m) => m.default);
+  const modelsByTier = TIER_ORDER.map((tier) => ({
+    tier,
+    models: models.filter((m) => m.tier === tier),
+  })).filter((group) => group.models.length > 0);
 
   function handleProviderChange(next: AiProvider) {
     setProvider(next);
@@ -147,36 +153,43 @@ export default function SettingsPage() {
 
         <div className="space-y-1.5">
           <Label>Model</Label>
-          <div className="space-y-1.5">
-            {models.map((m) => {
-              const isSelected = selectedModelId === m.id || (!selectedModelId && m.default);
-              return (
-                <label
-                  key={m.id}
-                  className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors ${
-                    isSelected ? "border-accent bg-accent/5" : "border-border hover:border-slate-soft"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="model"
-                    className="mt-1 accent-[var(--accent)]"
-                    checked={isSelected}
-                    onChange={() => setSelectedModelId(m.id)}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-ink">{m.label}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TIER_CLASS[m.tier]}`}>
-                        {TIER_LABEL[m.tier]}
-                      </span>
-                      {m.default && <span className="text-xs text-slate-soft">Default</span>}
-                    </div>
-                    <p className="mt-0.5 text-xs text-slate">{m.blurb}</p>
-                  </div>
-                </label>
-              );
-            })}
+          <p className="text-xs text-slate-soft">A wide range, low to high cost — pick whichever fits, not just the default.</p>
+          <div className="space-y-3">
+            {modelsByTier.map((group) => (
+              <div key={group.tier} className="space-y-1">
+                <p className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${TIER_CLASS[group.tier]}`}>
+                  {TIER_LABEL[group.tier]}
+                </p>
+                <div className="space-y-1">
+                  {group.models.map((m) => {
+                    const isSelected = selectedModelId === m.id || (!selectedModelId && m.default);
+                    return (
+                      <label
+                        key={m.id}
+                        className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 transition-colors ${
+                          isSelected ? "border-accent bg-accent/5" : "border-border hover:border-slate-soft"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="model"
+                          className="mt-1 accent-[var(--accent)]"
+                          checked={isSelected}
+                          onChange={() => setSelectedModelId(m.id)}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-ink">{m.label}</span>
+                            {m.default && <span className="text-xs text-slate-soft">Default</span>}
+                          </div>
+                          <p className="mt-0.5 text-xs text-slate">{m.blurb}</p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
 
             <label
               className={`flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5 transition-colors ${
