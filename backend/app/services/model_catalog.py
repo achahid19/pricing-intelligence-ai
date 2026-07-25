@@ -159,22 +159,16 @@ MODEL_CATALOG: dict[str, list[ModelInfo]] = {
     # app at all.
     "openrouter": [
         {
-            "id": "deepseek/deepseek-v4-flash",
-            "label": "DeepSeek V4 Flash",
+            "id": "qwen/qwen3-vl-8b-instruct",
+            "label": "Qwen3 VL 8B",
             "tier": "low",
-            "blurb": "Open-weight model, lowest cost of any option here.",
+            "blurb": "Open-weight vision model, lowest cost of any option here.",
         },
         {
-            "id": "deepseek/deepseek-v4-pro",
-            "label": "DeepSeek V4 Pro",
+            "id": "qwen/qwen2.5-vl-72b-instruct",
+            "label": "Qwen2.5 VL 72B",
             "tier": "low",
-            "blurb": "Stronger DeepSeek tier, still very cheap.",
-        },
-        {
-            "id": "meta-llama/llama-3.3-70b-instruct",
-            "label": "Llama 3.3 70B",
-            "tier": "low",
-            "blurb": "Well-known open-weight model, low cost.",
+            "blurb": "Larger open-weight vision model, still very cheap.",
         },
         {
             "id": "google/gemini-3.6-flash",
