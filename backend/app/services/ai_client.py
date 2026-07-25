@@ -12,14 +12,11 @@ import json
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.model_catalog import default_model_for
 from app.workspace.encryption import decrypt_key
 from app.workspace.models import AiProviderConfig
 
-DEFAULT_MODELS = {
-    "openai": "gpt-5.6-terra",
-    "google": "gemini-3.6-flash",
-    "anthropic": "claude-sonnet-5",
-}
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 _DESCRIBE_PROMPT = (
     "You're looking at a photo of a single product for an e-commerce catalog. "
@@ -65,13 +62,17 @@ async def describe_product_image(
     single product photo. Raises NoActiveProviderError if none configured."""
     config = await _get_active_config(db, workspace_id)
     api_key = decrypt_key(config.encrypted_api_key)
-    model = config.model_override or DEFAULT_MODELS[config.provider]
+    model = config.model_override or default_model_for(config.provider)
     b64 = base64.b64encode(image_bytes).decode()
 
-    if config.provider == "openai":
+    if config.provider in ("openai", "openrouter"):
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(api_key=api_key)
+        # OpenRouter is a drop-in OpenAI-API-compatible endpoint — same SDK,
+        # same request/response shape (including vision), just a different
+        # base_url and provider-prefixed model IDs (e.g. "google/gemini-3.6-flash").
+        base_url = OPENROUTER_BASE_URL if config.provider == "openrouter" else None
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         resp = await client.chat.completions.create(
             model=model,
             messages=[

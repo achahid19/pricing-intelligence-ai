@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_workspace
 from app.db.database import get_db
+from app.services.model_catalog import MODEL_CATALOG
 from app.workspace.encryption import encrypt_key
 from app.workspace.models import AiProviderConfig, Workspace
 from app.workspace.schemas import (
@@ -14,6 +15,14 @@ from app.workspace.schemas import (
 )
 
 router = APIRouter()
+
+
+@router.get("/models")
+async def list_model_catalog():
+    """Curated, cost-tiered model list per provider — single source of truth
+    so the frontend never hardcodes a model list that can drift from
+    ai_client.py's actual defaults. No auth needed; not workspace-specific."""
+    return MODEL_CATALOG
 
 
 @router.get("/me", response_model=WorkspaceOut)

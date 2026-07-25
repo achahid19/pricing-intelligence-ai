@@ -141,7 +141,19 @@ export interface AiDescribeResult {
   image_url: string;
 }
 
-export type AiProvider = "openai" | "google" | "anthropic";
+export type AiProvider = "openai" | "google" | "anthropic" | "openrouter";
+
+export type ModelTier = "low" | "medium" | "high";
+
+export interface ModelInfo {
+  id: string;
+  label: string;
+  tier: ModelTier;
+  blurb: string;
+  default?: boolean;
+}
+
+export type ModelCatalog = Record<AiProvider, ModelInfo[]>;
 
 export interface AiProviderConfig {
   id: number;
@@ -174,6 +186,7 @@ export const api = {
     me: () => request<Workspace>("/workspace/me"),
     updateContext: (payload: WorkspaceContextUpdate) =>
       request<Workspace>("/workspace/me", { method: "PATCH", body: JSON.stringify(payload) }),
+    listModelCatalog: () => request<ModelCatalog>("/workspace/models"),
     listAiProviders: () => request<AiProviderConfig[]>("/workspace/ai-provider"),
     setAiProvider: (payload: { provider: AiProvider; api_key: string; model_override?: string | null }) =>
       request<AiProviderConfig>("/workspace/ai-provider", { method: "POST", body: JSON.stringify(payload) }),

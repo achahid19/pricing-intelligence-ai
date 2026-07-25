@@ -6,28 +6,61 @@ import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api, ApiError, type AiProvider, type AiProviderConfig } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  type AiProvider,
+  type AiProviderConfig,
+  type ModelCatalog,
+  type ModelTier,
+} from "@/lib/api";
 
 const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: "openai", label: "OpenAI" },
   { value: "google", label: "Google" },
   { value: "anthropic", label: "Anthropic" },
+  { value: "openrouter", label: "OpenRouter" },
 ];
+
+const TIER_LABEL: Record<ModelTier, string> = {
+  low: "Low cost",
+  medium: "Medium cost",
+  high: "High cost",
+};
+
+const TIER_CLASS: Record<ModelTier, string> = {
+  low: "bg-good/10 text-good",
+  medium: "bg-slate/10 text-slate",
+  high: "bg-accent/10 text-accent",
+};
+
+const CUSTOM = "__custom__";
 
 export default function SettingsPage() {
   const [configs, setConfigs] = useState<AiProviderConfig[] | null>(null);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [provider, setProvider] = useState<AiProvider>("openai");
   const [apiKey, setApiKey] = useState("");
-  const [modelOverride, setModelOverride] = useState("");
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [customModel, setCustomModel] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     api.workspace.listAiProviders().then(setConfigs).catch(() => setConfigs([]));
+    api.workspace.listModelCatalog().then(setCatalog).catch(() => setCatalog(null));
   }, []);
 
   const active = configs?.find((c) => c.is_active);
+  const models = catalog?.[provider] ?? [];
+  const defaultModel = models.find((m) => m.default);
+
+  function handleProviderChange(next: AiProvider) {
+    setProvider(next);
+    setSelectedModelId("");
+    setCustomModel("");
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,6 +68,17 @@ export default function SettingsPage() {
       setError("API key is required.");
       return;
     }
+    let modelOverride: string | null = null;
+    if (selectedModelId === CUSTOM) {
+      if (!customModel.trim()) {
+        setError("Enter a model ID, or pick one from the list above.");
+        return;
+      }
+      modelOverride = customModel.trim();
+    } else if (selectedModelId && selectedModelId !== defaultModel?.id) {
+      modelOverride = selectedModelId;
+    }
+
     setError(null);
     setSaved(false);
     setSaving(true);
@@ -42,10 +86,11 @@ export default function SettingsPage() {
       await api.workspace.setAiProvider({
         provider,
         api_key: apiKey.trim(),
-        model_override: modelOverride.trim() || null,
+        model_override: modelOverride,
       });
       setApiKey("");
-      setModelOverride("");
+      setSelectedModelId("");
+      setCustomModel("");
       setSaved(true);
       const fresh = await api.workspace.listAiProviders();
       setConfigs(fresh);
@@ -77,7 +122,7 @@ export default function SettingsPage() {
           <select
             id="provider"
             value={provider}
-            onChange={(e) => setProvider(e.target.value as AiProvider)}
+            onChange={(e) => handleProviderChange(e.target.value as AiProvider)}
             className="h-10 w-full rounded-md border border-border bg-paper px-2 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
           >
             {PROVIDERS.map((p) => (
@@ -101,13 +146,61 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="model-override">Model override (optional)</Label>
-          <Input
-            id="model-override"
-            value={modelOverride}
-            onChange={(e) => setModelOverride(e.target.value)}
-            placeholder="Leave blank to use the default model"
-          />
+          <Label>Model</Label>
+          <div className="space-y-1.5">
+            {models.map((m) => {
+              const isSelected = selectedModelId === m.id || (!selectedModelId && m.default);
+              return (
+                <label
+                  key={m.id}
+                  className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors ${
+                    isSelected ? "border-accent bg-accent/5" : "border-border hover:border-slate-soft"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="model"
+                    className="mt-1 accent-[var(--accent)]"
+                    checked={isSelected}
+                    onChange={() => setSelectedModelId(m.id)}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-ink">{m.label}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TIER_CLASS[m.tier]}`}>
+                        {TIER_LABEL[m.tier]}
+                      </span>
+                      {m.default && <span className="text-xs text-slate-soft">Default</span>}
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate">{m.blurb}</p>
+                  </div>
+                </label>
+              );
+            })}
+
+            <label
+              className={`flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5 transition-colors ${
+                selectedModelId === CUSTOM ? "border-accent bg-accent/5" : "border-border hover:border-slate-soft"
+              }`}
+            >
+              <input
+                type="radio"
+                name="model"
+                className="accent-[var(--accent)]"
+                checked={selectedModelId === CUSTOM}
+                onChange={() => setSelectedModelId(CUSTOM)}
+              />
+              <span className="text-sm font-medium text-ink">Custom model ID</span>
+            </label>
+            {selectedModelId === CUSTOM && (
+              <Input
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+                placeholder="e.g. gpt-5.6-luna, or any model this provider serves"
+                className="ml-7 w-[calc(100%-1.75rem)]"
+              />
+            )}
+          </div>
         </div>
 
         {error && <p className="text-sm text-danger">{error}</p>}
