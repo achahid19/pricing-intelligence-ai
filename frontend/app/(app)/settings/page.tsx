@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Eye } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -153,7 +153,13 @@ export default function SettingsPage() {
 
         <div className="space-y-1.5">
           <Label>Model</Label>
-          <p className="text-xs text-slate-soft">A wide range, low to high cost — pick whichever fits, not just the default.</p>
+          <div className="flex items-start gap-2 rounded-md border border-border bg-paper px-3 py-2 text-xs text-slate">
+            <Eye className="mt-0.5 size-3.5 shrink-0 text-accent" />
+            <span>
+              This workspace uses AI to describe product photos, so it needs a model that can <strong className="text-ink">see images (multimodal)</strong> —
+              every option below supports that. A wide range, low to high cost: pick whichever fits, not just the default.
+            </span>
+          </div>
           <div className="space-y-3">
             {modelsByTier.map((group) => (
               <div key={group.tier} className="space-y-1">
@@ -206,12 +212,17 @@ export default function SettingsPage() {
               <span className="text-sm font-medium text-ink">Custom model ID</span>
             </label>
             {selectedModelId === CUSTOM && (
-              <Input
-                value={customModel}
-                onChange={(e) => setCustomModel(e.target.value)}
-                placeholder="e.g. gpt-5.6-luna, or any model this provider serves"
-                className="ml-7 w-[calc(100%-1.75rem)]"
-              />
+              <div className="ml-7 space-y-1">
+                <Input
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  placeholder="e.g. gpt-5.6-luna, or any model this provider serves"
+                  className="w-full"
+                />
+                <p className="text-xs text-slate-soft">
+                  Must support image input (multimodal) — photo-assist sends product photos to it and will fail on a text-only model.
+                </p>
+              </div>
             )}
           </div>
         </div>

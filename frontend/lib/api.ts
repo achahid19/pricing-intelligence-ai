@@ -150,6 +150,7 @@ export interface ModelInfo {
   label: string;
   tier: ModelTier;
   blurb: string;
+  vision: boolean;
   default?: boolean;
 }
 
