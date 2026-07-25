@@ -51,3 +51,9 @@ class ImportResultOut(BaseModel):
     created: int
     skipped: list[str] = []
     errors: list[str] = []
+
+
+class AiDescribeOut(BaseModel):
+    title: str
+    description: str
+    image_url: str

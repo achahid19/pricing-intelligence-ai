@@ -4,13 +4,16 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_workspace
 from app.catalog.models import Product
-from app.catalog.schemas import ImportResultOut, ProductCreate, ProductOut, ProductUpdate
+from app.catalog.schemas import AiDescribeOut, ImportResultOut, ProductCreate, ProductOut, ProductUpdate
 from app.db.database import get_db
+from app.services import ai_client
+from app.services.storage import save_image
 from app.workspace.models import Workspace
 
 router = APIRouter()
@@ -82,6 +85,34 @@ async def delete_product(
     await db.commit()
 
 
+# ── AI-assisted manual entry ────────────────────────────────────────────────
+
+
+@router.post("/ai-describe", response_model=AiDescribeOut)
+async def ai_describe_product(
+    file: UploadFile,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Given a product photo, save it and ask the workspace's active AI
+    provider for a suggested title + description. Returns suggestions only —
+    the caller (manual Add Product form) still requires the user to review
+    and submit them; nothing is written to the catalog here."""
+    image_url, image_bytes = await save_image(file)
+    try:
+        result = await ai_client.describe_product_image(
+            db, workspace.id, image_bytes, file.content_type or "image/jpeg"
+        )
+    except ai_client.NoActiveProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The AI provider couldn't generate a description for this image. Try again or enter details manually.",
+        )
+    return AiDescribeOut(title=result.get("title", ""), description=result.get("description", ""), image_url=image_url)
+
+
 # ── CSV/XLSX import ─────────────────────────────────────────────────────────
 
 # Header aliases accepted in import files (case-insensitive) — mirrors the
@@ -96,6 +127,10 @@ _HEADER_MAP = {
     "barcode": "barcode", "code_barre": "barcode", "gtin": "barcode",
     "description": "description",
 }
+
+# Canonical column order for the downloadable template — mirrors the
+# required/optional split documented on import_products() below.
+_TEMPLATE_HEADERS = ["name", "price", "currency", "sku", "category", "brand", "barcode", "description"]
 
 
 def _parse_import_rows(filename: str, content: bytes) -> list[dict]:
@@ -132,6 +167,19 @@ def _parse_import_rows(filename: str, content: bytes) -> list[dict]:
             if row:
                 rows.append(row)
     return rows
+
+
+@router.get("/import/template")
+async def download_import_template():
+    """A blank CSV with the exact column headers import_products() accepts,
+    so users don't have to guess or reverse-engineer them from an error."""
+    buffer = io.StringIO()
+    csv.writer(buffer).writerow(_TEMPLATE_HEADERS)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="product_import_template.csv"'},
+    )
 
 
 @router.post("/import", response_model=ImportResultOut)

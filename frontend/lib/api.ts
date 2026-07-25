@@ -135,6 +135,22 @@ export interface ImportResult {
   errors: string[];
 }
 
+export interface AiDescribeResult {
+  title: string;
+  description: string;
+  image_url: string;
+}
+
+export type AiProvider = "openai" | "google" | "anthropic";
+
+export interface AiProviderConfig {
+  id: number;
+  provider: AiProvider;
+  model_override: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
 export const api = {
   auth: {
     async signup(email: string, password: string, workspaceName: string) {
@@ -158,6 +174,9 @@ export const api = {
     me: () => request<Workspace>("/workspace/me"),
     updateContext: (payload: WorkspaceContextUpdate) =>
       request<Workspace>("/workspace/me", { method: "PATCH", body: JSON.stringify(payload) }),
+    listAiProviders: () => request<AiProviderConfig[]>("/workspace/ai-provider"),
+    setAiProvider: (payload: { provider: AiProvider; api_key: string; model_override?: string | null }) =>
+      request<AiProviderConfig>("/workspace/ai-provider", { method: "POST", body: JSON.stringify(payload) }),
   },
   products: {
     list: () => request<Product[]>("/products"),
@@ -166,6 +185,7 @@ export const api = {
     update: (id: number, payload: Partial<ProductCreate>) =>
       request<Product>(`/products/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
     delete: (id: number) => request<void>(`/products/${id}`, { method: "DELETE" }),
+    templateUrl: "/api/v1/products/import/template",
     async importFile(file: File): Promise<ImportResult> {
       // Bypasses the shared request() helper — it always sets
       // Content-Type: application/json, but a multipart upload needs the
@@ -174,6 +194,22 @@ export const api = {
       const formData = new FormData();
       formData.append("file", file);
       const res = await fetch("/api/v1/products/import", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(res.status, typeof body.detail === "string" ? body.detail : res.statusText);
+      }
+      return res.json();
+    },
+    async aiDescribe(file: File): Promise<AiDescribeResult> {
+      // Same multipart-bypass reasoning as importFile above.
+      const token = getToken();
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/v1/products/ai-describe", {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: formData,

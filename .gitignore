@@ -41,6 +41,9 @@ docker-data/
 # ── Database backups (local only) ───────────────────────────
 backups/
 
+# ── User-uploaded images (local disk storage, dev-mode only) ─
+backend/uploads/
+
 # ── Project docs (local dev reference only, not for the remote) ──
 CLAUDE.md
 docs/

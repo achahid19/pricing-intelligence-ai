@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutGrid, LogOut, Package } from "lucide-react";
+import { LayoutGrid, LogOut, Package, Settings } from "lucide-react";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { clearToken } from "@/lib/api";
@@ -10,6 +10,7 @@ import { clearToken } from "@/lib/api";
 const NAV = [
   { href: "/", label: "Home", icon: LayoutGrid },
   { href: "/catalog", label: "Catalog", icon: Package },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Sidebar({ workspaceName }: { workspaceName: string }) {

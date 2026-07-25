@@ -54,7 +54,12 @@ export function ImportProductsDialog({ onImported }: { onImported: () => void })
       />
       <DialogContent>
         <DialogTitle>Import products</DialogTitle>
-        <DialogDescription>CSV or XLSX. Columns: name, price required; sku, currency, category, brand, barcode, description optional.</DialogDescription>
+        <DialogDescription>
+          CSV or XLSX. Columns: name, price required; sku, currency, category, brand, barcode, description optional.{" "}
+          <a href={api.products.templateUrl} download className="font-medium text-accent hover:underline">
+            Download template
+          </a>
+        </DialogDescription>
 
         <div className="mt-5">
           <label
