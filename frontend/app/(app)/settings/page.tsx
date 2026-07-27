@@ -373,19 +373,19 @@ export default function SettingsPage() {
 
           <div className="space-y-1.5">
             <div className="flex items-center gap-1.5">
-              <Label htmlFor="report-interval">Report interval (hours)</Label>
-              <InfoTooltip text="How often to auto-generate a competitor report once reporting is built. Optional — leave blank for manual-only reports." />
+              <Label htmlFor="report-interval">Report frequency</Label>
+              <InfoTooltip text="How often to auto-generate a competitor report once reporting is built. You can always generate one manually in the meantime." />
             </div>
-            <Input
+            <select
               id="report-interval"
-              type="number"
-              min={1}
-              max={168}
               value={reportIntervalHours}
               onChange={(e) => setReportIntervalHours(e.target.value)}
-              placeholder="Manual only"
-              className="w-40"
-            />
+              className="h-10 w-48 rounded-md border border-border bg-paper px-2 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
+            >
+              <option value="">Manual only</option>
+              <option value="24">Daily</option>
+              <option value="168">Weekly</option>
+            </select>
           </div>
 
           {contextError && <p className="text-sm text-danger">{contextError}</p>}

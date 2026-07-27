@@ -124,7 +124,14 @@ async def describe_product_image(
         from google import genai
         from google.genai import types
 
-        client = genai.Client(api_key=api_key)
+        # Unlike the OpenAI/Anthropic SDKs (which retry transient failures
+        # twice by default), google-genai does NOT retry at all unless
+        # retry_options is explicitly set — without this, one 429/5xx/
+        # timeout fails the whole call.
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=3)),
+        )
         resp = await client.aio.models.generate_content(
             model=model,
             contents=[
@@ -224,7 +231,14 @@ async def discover_competitor_sites(
         from google import genai
         from google.genai import types
 
-        client = genai.Client(api_key=api_key)
+        # Unlike the OpenAI/Anthropic SDKs (which retry transient failures
+        # twice by default), google-genai does NOT retry at all unless
+        # retry_options is explicitly set — without this, one 429/5xx/
+        # timeout fails the whole call.
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=3)),
+        )
         grounding_tool = types.Tool(google_search=types.GoogleSearch())
         gen_config = types.GenerateContentConfig(tools=[grounding_tool])
         resp = await client.aio.models.generate_content(model=model, contents=[prompt], config=gen_config)

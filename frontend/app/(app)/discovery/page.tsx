@@ -249,14 +249,14 @@ export default function DiscoveryPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-10">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink">Discovery</h1>
           <p className="mt-1 text-sm text-slate">
             Find real competitors using web search, tailored to your business context and catalog.
           </p>
         </div>
-        <div className="flex items-end gap-3">
+        <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
             <div className="flex items-center gap-1.5">
               <label htmlFor="max-candidates" className="text-xs font-medium text-slate">

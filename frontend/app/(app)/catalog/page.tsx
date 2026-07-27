@@ -82,7 +82,7 @@ export default function CatalogPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-10">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink">
             Catalog
@@ -91,7 +91,7 @@ export default function CatalogPage() {
             {products ? `${products.length} product${products.length === 1 ? "" : "s"}` : "Loading…"}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <ImportProductsDialog onImported={load} />
           <ProductDialog onSaved={load} />
         </div>

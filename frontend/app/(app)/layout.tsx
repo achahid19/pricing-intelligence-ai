@@ -30,7 +30,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!workspace) return null;
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full flex-col md:flex-row">
       <Sidebar workspaceName={workspace.name} />
       <main className="flex-1 overflow-y-auto">{children}</main>
     </div>
