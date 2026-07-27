@@ -1,17 +1,23 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { ImagePlus, Plus, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ImagePlus, Pencil, Plus, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, type Product } from "@/lib/api";
 
 const CURRENCIES = ["USD", "EUR", "GBP", "MAD"];
 
-export function AddProductDialog({ onAdded }: { onAdded: () => void }) {
+interface ProductDialogProps {
+  product?: Product;
+  onSaved: () => void;
+}
+
+export function ProductDialog({ product, onSaved }: ProductDialogProps) {
+  const editing = !!product;
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
@@ -30,20 +36,22 @@ export function AddProductDialog({ onAdded }: { onAdded: () => void }) {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  function reset() {
-    setName("");
-    setPrice("");
-    setCurrency("USD");
-    setSku("");
-    setBrand("");
-    setCategory("");
-    setDescription("");
-    setError(null);
+  useEffect(() => {
+    if (!open) return;
+    setName(product?.name ?? "");
+    setPrice(product?.price ?? "");
+    setCurrency(product?.currency ?? "USD");
+    setSku(product?.sku ?? "");
+    setBrand(product?.brand ?? "");
+    setCategory(product?.category ?? "");
+    setDescription(product?.description ?? "");
+    setImageUrl(product?.image_url ?? null);
     setImageFile(null);
     setImagePreview(null);
-    setImageUrl(null);
+    setError(null);
     setGenerateError(null);
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   function handleImageSelect(file: File) {
     setImageFile(file);
@@ -80,20 +88,24 @@ export function AddProductDialog({ onAdded }: { onAdded: () => void }) {
     }
     setError(null);
     setLoading(true);
+    const payload = {
+      name: name.trim(),
+      price: parseFloat(price),
+      currency,
+      image_url: imageUrl,
+      description: description.trim() || null,
+      sku: sku.trim() || null,
+      brand: brand.trim() || null,
+      category: category.trim() || null,
+    };
     try {
-      await api.products.create({
-        name: name.trim(),
-        price: parseFloat(price),
-        currency,
-        image_url: imageUrl,
-        description: description.trim() || null,
-        sku: sku.trim() || null,
-        brand: brand.trim() || null,
-        category: category.trim() || null,
-      });
-      onAdded();
+      if (editing) {
+        await api.products.update(product.id, payload);
+      } else {
+        await api.products.create(payload);
+      }
+      onSaved();
       setOpen(false);
-      reset();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
@@ -102,23 +114,27 @@ export function AddProductDialog({ onAdded }: { onAdded: () => void }) {
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) reset();
-      }}
-    >
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button>
-            <Plus className="size-4" />
-            Add product
-          </Button>
+          editing ? (
+            <button
+              type="button"
+              aria-label="Edit product"
+              className="rounded-md p-1.5 text-slate-soft transition-colors hover:bg-black/[0.03] hover:text-ink"
+            >
+              <Pencil className="size-4" />
+            </button>
+          ) : (
+            <Button>
+              <Plus className="size-4" />
+              Add product
+            </Button>
+          )
         }
       />
       <DialogContent>
-        <DialogTitle>Add a product</DialogTitle>
+        <DialogTitle>{editing ? "Edit product" : "Add a product"}</DialogTitle>
         <DialogDescription>Name and price are the only required fields.</DialogDescription>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
@@ -128,9 +144,9 @@ export function AddProductDialog({ onAdded }: { onAdded: () => void }) {
               onClick={() => imageInputRef.current?.click()}
               className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed border-border bg-paper text-slate-soft transition-colors hover:border-slate-soft"
             >
-              {imagePreview ? (
+              {imagePreview || imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={imagePreview} alt="" className="size-full object-cover" />
+                <img src={imagePreview ?? imageUrl!} alt="" className="size-full object-cover" />
               ) : (
                 <ImagePlus className="size-5" />
               )}
@@ -157,9 +173,7 @@ export function AddProductDialog({ onAdded }: { onAdded: () => void }) {
                 {generating ? "Generating…" : "Generate with AI"}
               </Button>
               <p className="mt-1 text-xs text-slate-soft">
-                {imageFile
-                  ? "Suggests a title, category, and factual description from the photo."
-                  : "Add a photo to enable AI suggestions."}
+                {imageFile ? "Suggests a title, category, and factual description from the photo." : "Add a photo to enable AI suggestions."}
               </p>
             </div>
           </div>
@@ -230,7 +244,7 @@ export function AddProductDialog({ onAdded }: { onAdded: () => void }) {
           {error && <p className="text-sm text-danger">{error}</p>}
 
           <Button type="submit" disabled={loading} className="w-full">
-            {loading ? "Adding…" : "Add product"}
+            {loading ? "Saving…" : editing ? "Save changes" : "Add product"}
           </Button>
         </form>
       </DialogContent>
