@@ -189,7 +189,7 @@ export const api = {
       request<Workspace>("/workspace/me", { method: "PATCH", body: JSON.stringify(payload) }),
     listModelCatalog: () => request<ModelCatalog>("/workspace/models"),
     listAiProviders: () => request<AiProviderConfig[]>("/workspace/ai-provider"),
-    setAiProvider: (payload: { provider: AiProvider; api_key: string; model_override?: string | null }) =>
+    setAiProvider: (payload: { provider: AiProvider; api_key?: string; model_override?: string | null }) =>
       request<AiProviderConfig>("/workspace/ai-provider", { method: "POST", body: JSON.stringify(payload) }),
   },
   products: {

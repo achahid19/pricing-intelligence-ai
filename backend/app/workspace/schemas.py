@@ -44,8 +44,13 @@ class WorkspaceContextUpdate(BaseModel):
 
 
 class AiProviderConfigCreate(BaseModel):
+    """Also used to update an existing provider config (e.g. changing just
+    the model). `api_key` is optional: omit it to keep the already-stored
+    key when this provider already has a config — required only the first
+    time a provider is configured."""
+
     provider: Provider
-    api_key: str = Field(min_length=1)
+    api_key: Optional[str] = Field(default=None, min_length=1)
     model_override: Optional[str] = None
 
 

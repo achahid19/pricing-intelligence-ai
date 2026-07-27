@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,22 +66,27 @@ async def set_ai_provider(
         select(AiProviderConfig).where(AiProviderConfig.workspace_id == workspace.id)
     )
     existing_configs = result.scalars().all()
-
-    encrypted = encrypt_key(payload.api_key)
     target = next((c for c in existing_configs if c.provider == payload.provider), None)
+
+    if target is None and not payload.api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An API key is required the first time you configure this provider.",
+        )
 
     for config in existing_configs:
         config.is_active = config is target
 
     if target is not None:
-        target.encrypted_api_key = encrypted
+        if payload.api_key:
+            target.encrypted_api_key = encrypt_key(payload.api_key)
         target.model_override = payload.model_override
         target.is_active = True
     else:
         target = AiProviderConfig(
             workspace_id=workspace.id,
             provider=payload.provider,
-            encrypted_api_key=encrypted,
+            encrypted_api_key=encrypt_key(payload.api_key),
             model_override=payload.model_override,
             is_active=True,
         )

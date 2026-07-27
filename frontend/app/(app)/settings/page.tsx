@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Eye } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import {
   type AiProvider,
   type AiProviderConfig,
   type ModelCatalog,
+  type ModelInfo,
   type ModelTier,
 } from "@/lib/api";
 
@@ -30,13 +31,11 @@ const TIER_LABEL: Record<ModelTier, string> = {
   high: "High cost",
 };
 
-const TIER_CLASS: Record<ModelTier, string> = {
-  low: "bg-good/10 text-good",
-  medium: "bg-slate/10 text-slate",
-  high: "bg-accent/10 text-accent",
-};
-
 const CUSTOM = "__custom__";
+
+function findModel(models: ModelInfo[], id: string | null | undefined): ModelInfo | undefined {
+  return models.find((m) => m.id === id);
+}
 
 export default function SettingsPage() {
   const [configs, setConfigs] = useState<AiProviderConfig[] | null>(null);
@@ -48,30 +47,62 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const prefilled = useRef(false);
 
   useEffect(() => {
-    api.workspace.listAiProviders().then(setConfigs).catch(() => setConfigs([]));
-    api.workspace.listModelCatalog().then(setCatalog).catch(() => setCatalog(null));
+    Promise.all([
+      api.workspace.listAiProviders().catch(() => []),
+      api.workspace.listModelCatalog().catch(() => null),
+    ]).then(([configsResult, catalogResult]) => {
+      setConfigs(configsResult);
+      setCatalog(catalogResult);
+      if (!prefilled.current) {
+        prefilled.current = true;
+        prefillModel("openai", configsResult, catalogResult);
+      }
+    });
   }, []);
 
+  function prefillModel(nextProvider: AiProvider, configsList: AiProviderConfig[], catalogData: ModelCatalog | null) {
+    const existing = configsList.find((c) => c.provider === nextProvider);
+    const models = catalogData?.[nextProvider] ?? [];
+    if (existing?.model_override) {
+      if (findModel(models, existing.model_override)) {
+        setSelectedModelId(existing.model_override);
+        setCustomModel("");
+      } else {
+        setSelectedModelId(CUSTOM);
+        setCustomModel(existing.model_override);
+      }
+    } else {
+      setSelectedModelId("");
+      setCustomModel("");
+    }
+  }
+
   const active = configs?.find((c) => c.is_active);
+  const configForProvider = configs?.find((c) => c.provider === provider);
   const models = catalog?.[provider] ?? [];
   const defaultModel = models.find((m) => m.default);
+  const selectedModel = findModel(models, selectedModelId);
   const modelsByTier = TIER_ORDER.map((tier) => ({
     tier,
     models: models.filter((m) => m.tier === tier),
   })).filter((group) => group.models.length > 0);
+  const apiKeyRequired = !configForProvider;
 
   function handleProviderChange(next: AiProvider) {
     setProvider(next);
-    setSelectedModelId("");
-    setCustomModel("");
+    setApiKey("");
+    setError(null);
+    setSaved(false);
+    prefillModel(next, configs ?? [], catalog);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!apiKey.trim()) {
-      setError("API key is required.");
+    if (apiKeyRequired && !apiKey.trim()) {
+      setError("An API key is required the first time you configure this provider.");
       return;
     }
     let modelOverride: string | null = null;
@@ -91,12 +122,10 @@ export default function SettingsPage() {
     try {
       await api.workspace.setAiProvider({
         provider,
-        api_key: apiKey.trim(),
+        api_key: apiKey.trim() || undefined,
         model_override: modelOverride,
       });
       setApiKey("");
-      setSelectedModelId("");
-      setCustomModel("");
       setSaved(true);
       const fresh = await api.workspace.listAiProviders();
       setConfigs(fresh);
@@ -131,100 +160,78 @@ export default function SettingsPage() {
             onChange={(e) => handleProviderChange(e.target.value as AiProvider)}
             className="h-10 w-full rounded-md border border-border bg-paper px-2 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
           >
-            {PROVIDERS.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
+            {PROVIDERS.map((p) => {
+              const hasConfig = configs?.some((c) => c.provider === p.value);
+              return (
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                  {hasConfig ? " — configured" : ""}
+                </option>
+              );
+            })}
           </select>
+          <p className="text-xs text-slate-soft">
+            {configForProvider
+              ? `Already configured${configForProvider.is_active ? " and active" : ""} — change the model below without re-entering your key, or enter a new key to rotate it.`
+              : "Not configured yet — an API key is required."}
+          </p>
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="api-key">API key</Label>
+          <Label htmlFor="api-key">API key {!apiKeyRequired && <span className="font-normal text-slate-soft">(optional)</span>}</Label>
           <Input
             id="api-key"
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-…"
+            placeholder={apiKeyRequired ? "sk-…" : "Leave blank to keep your saved key"}
             autoComplete="off"
           />
         </div>
 
         <div className="space-y-1.5">
-          <Label>Model</Label>
+          <Label htmlFor="model">Model</Label>
           <div className="flex items-start gap-2 rounded-md border border-border bg-paper px-3 py-2 text-xs text-slate">
             <Eye className="mt-0.5 size-3.5 shrink-0 text-accent" />
             <span>
               This workspace uses AI to describe product photos, so it needs a model that can <strong className="text-ink">see images (multimodal)</strong> —
-              every option below supports that. A wide range, low to high cost: pick whichever fits, not just the default.
+              every option below supports that.
             </span>
           </div>
-          <div className="space-y-3">
-            {modelsByTier.map((group) => (
-              <div key={group.tier} className="space-y-1">
-                <p className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${TIER_CLASS[group.tier]}`}>
-                  {TIER_LABEL[group.tier]}
-                </p>
-                <div className="space-y-1">
-                  {group.models.map((m) => {
-                    const isSelected = selectedModelId === m.id || (!selectedModelId && m.default);
-                    return (
-                      <label
-                        key={m.id}
-                        className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 transition-colors ${
-                          isSelected ? "border-accent bg-accent/5" : "border-border hover:border-slate-soft"
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="model"
-                          className="mt-1 accent-[var(--accent)]"
-                          checked={isSelected}
-                          onChange={() => setSelectedModelId(m.id)}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-ink">{m.label}</span>
-                            {m.default && <span className="text-xs text-slate-soft">Default</span>}
-                          </div>
-                          <p className="mt-0.5 text-xs text-slate">{m.blurb}</p>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
 
-            <label
-              className={`flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5 transition-colors ${
-                selectedModelId === CUSTOM ? "border-accent bg-accent/5" : "border-border hover:border-slate-soft"
-              }`}
-            >
-              <input
-                type="radio"
-                name="model"
-                className="accent-[var(--accent)]"
-                checked={selectedModelId === CUSTOM}
-                onChange={() => setSelectedModelId(CUSTOM)}
+          <select
+            id="model"
+            value={selectedModelId || defaultModel?.id || ""}
+            onChange={(e) => setSelectedModelId(e.target.value)}
+            className="h-10 w-full rounded-md border border-border bg-paper px-2 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
+          >
+            {modelsByTier.map((group) => (
+              <optgroup key={group.tier} label={TIER_LABEL[group.tier]}>
+                {group.models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                    {m.default ? " (default)" : ""}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+            <option value={CUSTOM}>Custom model ID…</option>
+          </select>
+
+          {selectedModelId === CUSTOM ? (
+            <div className="space-y-1">
+              <Input
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+                placeholder="e.g. gpt-5.6-luna, or any model this provider serves"
               />
-              <span className="text-sm font-medium text-ink">Custom model ID</span>
-            </label>
-            {selectedModelId === CUSTOM && (
-              <div className="ml-7 space-y-1">
-                <Input
-                  value={customModel}
-                  onChange={(e) => setCustomModel(e.target.value)}
-                  placeholder="e.g. gpt-5.6-luna, or any model this provider serves"
-                  className="w-full"
-                />
-                <p className="text-xs text-slate-soft">
-                  Must support image input (multimodal) — photo-assist sends product photos to it and will fail on a text-only model.
-                </p>
-              </div>
-            )}
-          </div>
+              <p className="text-xs text-slate-soft">
+                Must support image input (multimodal) — photo-assist sends product photos to it and will fail on a text-only model.
+              </p>
+            </div>
+          ) : (
+            selectedModel && <p className="text-xs text-slate">{selectedModel.blurb}</p>
+          )}
         </div>
 
         {error && <p className="text-sm text-danger">{error}</p>}
