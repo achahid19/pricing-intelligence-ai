@@ -25,18 +25,6 @@ _DESCRIBE_PROMPT = (
     '"description": "<a 1-3 sentence product description a shopper would find useful>"}'
 )
 
-_EXTRACT_PROMPT_TEMPLATE = (
-    "You're looking at the text content of a web page ({url}), possibly a single "
-    "product page from an e-commerce site. If it describes exactly one purchasable "
-    "product with a price, respond with ONLY this JSON object, no markdown fences: "
-    '{{"title": "<product name>", "price": "<numeric price only, e.g. 29.99, no currency symbol>", '
-    '"currency": "<3-letter currency code if determinable, else null>", '
-    '"description": "<a 1-3 sentence description>", "brand": "<brand/manufacturer if mentioned, else null>"}} '
-    'If the page is NOT a single product page (e.g. a homepage, category/listing page, '
-    'article, or cart/account page), respond with exactly: {{"title": null}}\n\n'
-    "Page content:\n{page_text}"
-)
-
 
 class NoActiveProviderError(Exception):
     """Raised when a workspace has no active AiProviderConfig configured."""
@@ -130,52 +118,6 @@ async def describe_product_image(
                 types.Part.from_bytes(data=image_bytes, mime_type=content_type),
             ],
         )
-        return _extract_json(resp.text)
-
-    raise ValueError(f"Unknown provider: {config.provider}")
-
-
-async def extract_product_from_text(
-    db: AsyncSession, workspace_id: int, page_text: str, url: str
-) -> dict:
-    """Ask the workspace's active AI provider whether a page's text content
-    describes a single product, and if so extract title/price/etc as JSON.
-    Returns {"title": None} for pages that aren't a single product page.
-    Text-only (no image) — a separate call from describe_product_image since
-    the content shape genuinely differs per provider, not just duplicated
-    for no reason."""
-    config = await _get_active_config(db, workspace_id)
-    api_key = decrypt_key(config.encrypted_api_key)
-    model = config.model_override or default_model_for(config.provider)
-    prompt = _EXTRACT_PROMPT_TEMPLATE.format(url=url, page_text=page_text)
-
-    if config.provider in ("openai", "openrouter"):
-        from openai import AsyncOpenAI
-
-        base_url = OPENROUTER_BASE_URL if config.provider == "openrouter" else None
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return _extract_json(resp.choices[0].message.content)
-
-    if config.provider == "anthropic":
-        from anthropic import AsyncAnthropic
-
-        client = AsyncAnthropic(api_key=api_key)
-        resp = await client.messages.create(
-            model=model,
-            max_tokens=500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return _extract_json(resp.content[0].text)
-
-    if config.provider == "google":
-        from google import genai
-
-        client = genai.Client(api_key=api_key)
-        resp = await client.aio.models.generate_content(model=model, contents=[prompt])
         return _extract_json(resp.text)
 
     raise ValueError(f"Unknown provider: {config.provider}")
