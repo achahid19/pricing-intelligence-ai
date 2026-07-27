@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api, ApiError, type Product } from "@/lib/api";
+import { api, ApiError, type ModelTier, type Product } from "@/lib/api";
+import { TIER_BADGE_CLASS, TIER_LABEL } from "@/lib/modelTiers";
 
 const CURRENCIES = ["USD", "EUR", "GBP", "MAD"];
 
@@ -22,6 +23,7 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [currency, setCurrency] = useState("USD");
+  const [minPrice, setMinPrice] = useState("");
   const [sku, setSku] = useState("");
   const [brand, setBrand] = useState("");
   const [category, setCategory] = useState("");
@@ -34,6 +36,7 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [activeTier, setActiveTier] = useState<ModelTier | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -41,6 +44,7 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
     setName(product?.name ?? "");
     setPrice(product?.price ?? "");
     setCurrency(product?.currency ?? "USD");
+    setMinPrice(product?.min_price ?? "");
     setSku(product?.sku ?? "");
     setBrand(product?.brand ?? "");
     setCategory(product?.category ?? "");
@@ -50,6 +54,18 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
     setImagePreview(null);
     setError(null);
     setGenerateError(null);
+    setActiveTier(null);
+
+    Promise.all([api.workspace.listAiProviders().catch(() => []), api.workspace.listModelCatalog().catch(() => null)]).then(
+      ([configs, catalog]) => {
+        const active = configs.find((c) => c.is_active);
+        if (!active || !catalog) return;
+        const models = catalog[active.provider] ?? [];
+        const modelId = active.model_override || models.find((m) => m.default)?.id;
+        const tier = models.find((m) => m.id === modelId)?.tier;
+        if (tier) setActiveTier(tier);
+      }
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -92,6 +108,7 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
       name: name.trim(),
       price: parseFloat(price),
       currency,
+      min_price: minPrice ? parseFloat(minPrice) : null,
       image_url: imageUrl,
       description: description.trim() || null,
       sku: sku.trim() || null,
@@ -162,16 +179,23 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
               }}
             />
             <div className="flex-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!imageFile || generating}
-                onClick={handleGenerate}
-              >
-                <Sparkles className="size-3.5" />
-                {generating ? "Generating…" : "Generate with AI"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!imageFile || generating}
+                  onClick={handleGenerate}
+                >
+                  <Sparkles className="size-3.5" />
+                  {generating ? "Generating…" : "Generate with AI"}
+                </Button>
+                {activeTier && (
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TIER_BADGE_CLASS[activeTier]}`}>
+                    {TIER_LABEL[activeTier]}
+                  </span>
+                )}
+              </div>
               <p className="mt-1 text-xs text-slate-soft">
                 {imageFile ? "Suggests a title, category, and factual description from the photo." : "Add a photo to enable AI suggestions."}
               </p>
@@ -212,6 +236,22 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="min-price">Minimum advertised price / MAP (optional)</Label>
+            <Input
+              id="min-price"
+              type="number"
+              step="0.01"
+              min="0"
+              value={minPrice}
+              onChange={(e) => setMinPrice(e.target.value)}
+              placeholder="Leave blank if you don't enforce MAP"
+            />
+            <p className="text-xs text-slate-soft">
+              The lowest price resellers are allowed to advertise this at — used to flag violations later.
+            </p>
           </div>
 
           <div className="space-y-1.5">

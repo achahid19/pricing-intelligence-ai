@@ -13,8 +13,8 @@ import {
   type AiProviderConfig,
   type ModelCatalog,
   type ModelInfo,
-  type ModelTier,
 } from "@/lib/api";
+import { TIER_LABEL, TIER_ORDER } from "@/lib/modelTiers";
 
 const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: "openai", label: "OpenAI" },
@@ -22,14 +22,6 @@ const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: "anthropic", label: "Anthropic" },
   { value: "openrouter", label: "OpenRouter" },
 ];
-
-const TIER_ORDER: ModelTier[] = ["low", "medium", "high"];
-
-const TIER_LABEL: Record<ModelTier, string> = {
-  low: "Low cost",
-  medium: "Medium cost",
-  high: "High cost",
-};
 
 const CUSTOM = "__custom__";
 

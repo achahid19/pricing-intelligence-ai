@@ -220,6 +220,11 @@ export default function CatalogPage() {
                     <span className="font-[family-name:var(--font-data)] text-sm tabular-nums text-ink">
                       {p.currency} {p.price}
                     </span>
+                    {p.min_price && (
+                      <p className="font-[family-name:var(--font-data)] text-xs tabular-nums text-slate-soft" title="Minimum advertised price (MAP)">
+                        MAP {p.currency} {p.min_price}
+                      </p>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">

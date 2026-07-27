@@ -106,6 +106,7 @@ export interface Product {
   name: string;
   price: string;
   currency: string;
+  min_price: string | null;
   image_url: string | null;
   description: string | null;
   sku: string | null;
@@ -121,6 +122,7 @@ export interface ProductCreate {
   name: string;
   price: number;
   currency?: string;
+  min_price?: number | null;
   image_url?: string | null;
   description?: string | null;
   sku?: string | null;

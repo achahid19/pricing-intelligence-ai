@@ -9,6 +9,7 @@ class ProductCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     price: Decimal = Field(gt=0)
     currency: str = Field(default="USD", min_length=3, max_length=3)
+    min_price: Optional[Decimal] = Field(default=None, gt=0)
     image_url: Optional[str] = Field(default=None, max_length=1000)
     description: Optional[str] = Field(default=None, max_length=5000)
     sku: Optional[str] = Field(default=None, max_length=100)
@@ -21,6 +22,7 @@ class ProductUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     price: Optional[Decimal] = Field(default=None, gt=0)
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
+    min_price: Optional[Decimal] = Field(default=None, gt=0)
     image_url: Optional[str] = Field(default=None, max_length=1000)
     description: Optional[str] = Field(default=None, max_length=5000)
     sku: Optional[str] = Field(default=None, max_length=100)
@@ -34,6 +36,7 @@ class ProductOut(BaseModel):
     name: str
     price: Decimal
     currency: str
+    min_price: Optional[Decimal]
     image_url: Optional[str]
     description: Optional[str]
     sku: Optional[str]

@@ -26,6 +26,12 @@ class Product(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False, default="USD")
+    # MAP floor — the lowest price resellers are allowed to *advertise* this
+    # product at. Optional and independent of `price`: not every workspace
+    # enforces MAP, and where it does apply there's no fixed relationship
+    # to the workspace's own listed price (that's a per-business policy
+    # call, not something to validate here).
+    min_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
