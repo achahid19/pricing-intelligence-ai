@@ -1,20 +1,32 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Tooltip } from "@base-ui/react/tooltip";
 import { CheckCircle2, Eye } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Combobox } from "@/components/ui/combobox";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   api,
   ApiError,
+  KNOWN_OBJECTIVES,
   type AiProvider,
   type AiProviderConfig,
   type ModelCatalog,
   type ModelInfo,
+  type Workspace,
 } from "@/lib/api";
+import { COUNTRIES } from "@/lib/countries";
+import { INDUSTRIES } from "@/lib/industries";
 import { TIER_LABEL, TIER_ORDER } from "@/lib/modelTiers";
+
+const OTHER_INDUSTRY = "Other";
+const INDUSTRY_OPTIONS = [...INDUSTRIES, OTHER_INDUSTRY];
 
 const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: "openai", label: "OpenAI" },
@@ -40,6 +52,18 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const prefilled = useRef(false);
 
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [objectives, setObjectives] = useState<string[]>([]);
+  const [objectivesNote, setObjectivesNote] = useState("");
+  const [country, setCountry] = useState<string | null>(null);
+  const [industry, setIndustry] = useState<string | null>(null);
+  const [industryOther, setIndustryOther] = useState("");
+  const [website, setWebsite] = useState("");
+  const [reportIntervalHours, setReportIntervalHours] = useState("");
+  const [contextSaving, setContextSaving] = useState(false);
+  const [contextError, setContextError] = useState<string | null>(null);
+  const [contextSaved, setContextSaved] = useState(false);
+
   useEffect(() => {
     Promise.all([
       api.workspace.listAiProviders().catch(() => []),
@@ -52,7 +76,57 @@ export default function SettingsPage() {
         prefillModel("openai", configsResult, catalogResult);
       }
     });
+    api.workspace.me().then((ws) => {
+      setWorkspace(ws);
+      setObjectives(ws.objectives_selected ?? []);
+      setObjectivesNote(ws.objectives_note ?? "");
+      setCountry(ws.country);
+      if (ws.market && INDUSTRIES.includes(ws.market)) {
+        setIndustry(ws.market);
+      } else if (ws.market) {
+        setIndustry(OTHER_INDUSTRY);
+        setIndustryOther(ws.market);
+      }
+      setWebsite(ws.website ?? "");
+      setReportIntervalHours(ws.report_interval_hours != null ? String(ws.report_interval_hours) : "");
+    });
   }, []);
+
+  function toggleObjective(value: string, checked: boolean) {
+    setObjectives((prev) => (checked ? [...prev, value] : prev.filter((o) => o !== value)));
+  }
+
+  async function handleContextSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (objectives.length === 0) {
+      setContextError("Pick at least one objective.");
+      return;
+    }
+    if (!country) {
+      setContextError("Country is required so discovery can scope results correctly.");
+      return;
+    }
+    const resolvedIndustry = industry === OTHER_INDUSTRY ? industryOther.trim() : industry;
+    setContextError(null);
+    setContextSaved(false);
+    setContextSaving(true);
+    try {
+      const updated = await api.workspace.updateContext({
+        objectives_selected: objectives,
+        objectives_note: objectivesNote || null,
+        country,
+        market: resolvedIndustry || null,
+        website: website.trim() || null,
+        report_interval_hours: reportIntervalHours.trim() ? Number(reportIntervalHours) : null,
+      });
+      setWorkspace(updated);
+      setContextSaved(true);
+    } catch (err) {
+      setContextError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
+    } finally {
+      setContextSaving(false);
+    }
+  }
 
   function prefillModel(nextProvider: AiProvider, configsList: AiProviderConfig[], catalogData: ModelCatalog | null) {
     const existing = configsList.find((c) => c.provider === nextProvider);
@@ -232,6 +306,96 @@ export default function SettingsPage() {
           {saving ? "Saving…" : "Save"}
         </Button>
       </form>
+
+      <h2 className="mt-10 font-[family-name:var(--font-display)] text-xl font-semibold text-ink">Business context</h2>
+      <p className="mt-1 text-sm text-slate">
+        What discovery and reports are built around — set at onboarding, editable any time as your business changes.
+      </p>
+
+      {!workspace ? (
+        <p className="mt-6 text-sm text-slate-soft">Loading…</p>
+      ) : (
+        <form onSubmit={handleContextSubmit} className="mt-6 space-y-6 rounded-lg border border-border bg-paper-raised p-6">
+          <div className="space-y-3">
+            <Label>Why are you using this platform?</Label>
+            <Tooltip.Provider>
+              {KNOWN_OBJECTIVES.map((o) => (
+                <div key={o.value} className="flex items-center gap-2">
+                  <label className="flex items-center gap-3">
+                    <Checkbox
+                      checked={objectives.includes(o.value)}
+                      onCheckedChange={(checked) => toggleObjective(o.value, checked)}
+                    />
+                    <span className="text-sm text-ink">{o.label}</span>
+                  </label>
+                  <InfoTooltip text={o.description} />
+                </div>
+              ))}
+            </Tooltip.Provider>
+            <Textarea
+              value={objectivesNote}
+              onChange={(e) => setObjectivesNote(e.target.value)}
+              placeholder="Anything else? (optional)"
+              rows={2}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="country">Country</Label>
+              <Combobox id="country" options={COUNTRIES} value={country} onValueChange={setCountry} placeholder="Search countries…" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="industry">Market / industry</Label>
+              <Combobox
+                id="industry"
+                options={INDUSTRY_OPTIONS}
+                value={industry}
+                onValueChange={setIndustry}
+                placeholder="Search industries…"
+              />
+            </div>
+          </div>
+
+          {industry === OTHER_INDUSTRY && (
+            <Input value={industryOther} onChange={(e) => setIndustryOther(e.target.value)} placeholder="Describe your industry" />
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="context-website">Your website</Label>
+            <Input
+              id="context-website"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              placeholder="acme.com"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="report-interval">Report interval (hours)</Label>
+              <InfoTooltip text="How often to auto-generate a competitor report once reporting is built. Optional — leave blank for manual-only reports." />
+            </div>
+            <Input
+              id="report-interval"
+              type="number"
+              min={1}
+              max={168}
+              value={reportIntervalHours}
+              onChange={(e) => setReportIntervalHours(e.target.value)}
+              placeholder="Manual only"
+              className="w-40"
+            />
+          </div>
+
+          {contextError && <p className="text-sm text-danger">{contextError}</p>}
+          {contextSaved && !contextError && <p className="text-sm text-good">Saved.</p>}
+
+          <Button type="submit" disabled={contextSaving} className="w-full">
+            {contextSaving ? "Saving…" : "Save business context"}
+          </Button>
+        </form>
+      )}
     </div>
   );
 }
