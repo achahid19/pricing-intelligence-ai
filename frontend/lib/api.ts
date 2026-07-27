@@ -264,7 +264,11 @@ export const api = {
     },
   },
   discovery: {
-    createRun: () => request<DiscoveryRun>("/discovery/runs", { method: "POST" }),
+    createRun: (maxCandidates: number) =>
+      request<DiscoveryRun>("/discovery/runs", {
+        method: "POST",
+        body: JSON.stringify({ max_candidates: maxCandidates }),
+      }),
     listRuns: () => request<DiscoveryRun[]>("/discovery/runs"),
     getRun: (id: number) => request<DiscoveryRun>(`/discovery/runs/${id}`),
     updateSite: (id: number, status: CompetitorSiteStatus) =>

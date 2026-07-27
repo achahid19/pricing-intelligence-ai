@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, ExternalLink, Search, Sparkles, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { api, ApiError, type CompetitorSite, type DiscoveryRun } from "@/lib/api";
 
 function ConfidenceBadge({ score }: { score: number }) {
@@ -84,6 +85,7 @@ export default function DiscoveryPage() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [maxCandidates, setMaxCandidates] = useState(10);
 
   const load = useCallback(() => {
     api.discovery.listRuns().then(setRuns).catch(() => setRuns([]));
@@ -98,7 +100,7 @@ export default function DiscoveryPage() {
     setError(null);
     setRunning(true);
     try {
-      await api.discovery.createRun();
+      await api.discovery.createRun(maxCandidates);
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
@@ -131,10 +133,32 @@ export default function DiscoveryPage() {
             Find real competitors using web search, tailored to your business context and catalog.
           </p>
         </div>
-        <Button onClick={handleRun} disabled={running}>
-          <Sparkles className="size-4" />
-          {running ? "Researching…" : "Run discovery"}
-        </Button>
+        <div className="flex items-end gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="max-candidates" className="text-xs font-medium text-slate">
+                Max competitors
+              </label>
+              <InfoTooltip text="More competitors found means more AI reasoning and web-search cost on this run — your provider bills for both, so higher isn't free." />
+            </div>
+            <input
+              id="max-candidates"
+              type="number"
+              min={1}
+              max={25}
+              value={maxCandidates}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                setMaxCandidates(Number.isNaN(next) ? 10 : Math.min(25, Math.max(1, next)));
+              }}
+              className="h-10 w-20 rounded-md border border-border bg-paper-raised px-2 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
+            />
+          </div>
+          <Button onClick={handleRun} disabled={running}>
+            <Sparkles className="size-4" />
+            {running ? "Researching…" : "Run discovery"}
+          </Button>
+        </div>
       </div>
 
       {running && <p className="mt-4 text-sm text-slate-soft">This can take up to 30 seconds — your AI provider is actively searching the web.</p>}

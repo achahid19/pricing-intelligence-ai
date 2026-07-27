@@ -8,15 +8,13 @@ from sqlalchemy.orm import selectinload
 from app.auth.dependencies import get_current_workspace
 from app.catalog.models import Product
 from app.discovery.models import CompetitorSite, DiscoveryRun
-from app.discovery.schemas import CompetitorSiteOut, CompetitorSiteUpdate, DiscoveryRunOut
+from app.discovery.schemas import CompetitorSiteOut, CompetitorSiteUpdate, DiscoveryRunCreate, DiscoveryRunOut
 from app.db.database import get_db
 from app.services import ai_client
 from app.services.model_catalog import default_model_for
 from app.workspace.models import AiProviderConfig, Workspace
 
 router = APIRouter()
-
-MAX_CANDIDATES = 10
 
 
 def _to_run_out(run: DiscoveryRun, search_count: Optional[int] = None) -> DiscoveryRunOut:
@@ -35,13 +33,15 @@ def _to_run_out(run: DiscoveryRun, search_count: Optional[int] = None) -> Discov
 
 @router.post("/runs", response_model=DiscoveryRunOut)
 async def create_discovery_run(
+    payload: DiscoveryRunCreate,
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
     """Trigger a competitor-discovery run: the workspace's active AI
     provider researches the web (its own native search tool) and proposes
-    up to MAX_CANDIDATES competitor sites with confidence + rationale.
+    up to payload.max_candidates competitor sites with confidence + rationale.
     Synchronous — a single web-search-enabled AI call, may take 10-30s."""
+    max_candidates = payload.max_candidates
     active_result = await db.execute(
         select(AiProviderConfig).where(
             AiProviderConfig.workspace_id == workspace.id,
@@ -64,7 +64,7 @@ async def create_discovery_run(
         workspace_id=workspace.id,
         ai_provider=active_config.provider,
         model=model,
-        context_snapshot={"context": context, "max_candidates": MAX_CANDIDATES},
+        context_snapshot={"context": context, "max_candidates": max_candidates},
         status="running",
     )
     db.add(run)
@@ -72,7 +72,7 @@ async def create_discovery_run(
 
     try:
         result, search_count = await ai_client.discover_competitor_sites(
-            db, workspace.id, context, max_candidates=MAX_CANDIDATES
+            db, workspace.id, context, max_candidates=max_candidates
         )
     except Exception as exc:
         run.status = "failed"
@@ -83,7 +83,7 @@ async def create_discovery_run(
             detail="The AI provider couldn't complete discovery. Try again in a moment.",
         )
 
-    for candidate in result.get("candidates", [])[:MAX_CANDIDATES]:
+    for candidate in result.get("candidates", [])[:max_candidates]:
         domain = (candidate.get("domain") or "").strip().lower()
         if not domain:
             continue

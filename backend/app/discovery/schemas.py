@@ -1,7 +1,14 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class DiscoveryRunCreate(BaseModel):
+    # Upper bound is a hard safety cap, not just a UI suggestion — more
+    # candidates means more AI reasoning/search cost with no cost-estimate
+    # system in place yet (see docs/DECISIONS.md).
+    max_candidates: int = Field(default=10, ge=1, le=25)
 
 
 class CompetitorSiteOut(BaseModel):
