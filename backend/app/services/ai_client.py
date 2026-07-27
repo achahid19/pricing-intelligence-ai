@@ -8,6 +8,7 @@ workspace instead of a single global setting.
 """
 import base64
 import json
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +58,19 @@ def _extract_json(text: str) -> dict:
         if text.lower().startswith("json"):
             text = text[4:]
     return json.loads(text.strip())
+
+
+def _extract_json_object(text: str) -> dict:
+    """More lenient than _extract_json: web-search-enabled responses are more
+    likely to include a sentence of preamble ("Based on my research...")
+    before the JSON, even when explicitly told not to. Finds the outermost
+    {...} block rather than assuming the whole string is valid JSON on its
+    own."""
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("No JSON object found in response")
+    return json.loads(text[start : end + 1])
 
 
 async def describe_product_image(
@@ -119,5 +133,100 @@ async def describe_product_image(
             ],
         )
         return _extract_json(resp.text)
+
+    raise ValueError(f"Unknown provider: {config.provider}")
+
+
+_DISCOVER_PROMPT_TEMPLATE = (
+    "You are researching real, currently-operating competitor businesses using web search — "
+    "not guessing from memory or training data. Use your web search tool to find actual companies.\n\n"
+    "Business context:\n{context}\n\n"
+    "Search the web and identify up to {max_candidates} real competitor businesses: companies "
+    "selling similar products or services to a similar customer base. For each one, base your "
+    "confidence on what you actually found, not assumptions.\n\n"
+    "Respond with ONLY a JSON object, no markdown fences, no commentary before or after: "
+    '{{"candidates": [{{"domain": "<bare domain, e.g. example.com, no scheme or path>", '
+    '"name": "<company name>", '
+    '"confidence": <integer 0-100, how well this is actually a competitor based on what you found>, '
+    '"rationale": "<1-2 sentences explaining the match, referencing something specific you found>", '
+    '"estimated_product_count": <integer estimate if you can tell from what you found, else null>}}]}}'
+)
+
+
+def build_discovery_context(workspace, products: list) -> str:
+    """Renders a workspace's business context + catalog summary into the
+    text block sent to discover_competitor_sites(). Deliberately a summary
+    (categories + a handful of example names), not the full catalog."""
+    lines = []
+    if workspace.objectives_selected:
+        lines.append(f"Objectives: {', '.join(workspace.objectives_selected)}")
+    if workspace.objectives_note:
+        lines.append(f"Additional context from the business owner: {workspace.objectives_note}")
+    if workspace.country:
+        lines.append(f"Country: {workspace.country}")
+    if workspace.market:
+        lines.append(f"Industry/market: {workspace.market}")
+    if workspace.website:
+        lines.append(f"Business website: {workspace.website}")
+    categories = sorted({p.category for p in products if p.category})
+    if categories:
+        lines.append(f"Product categories sold: {', '.join(categories)}")
+    sample_names = [p.name for p in products[:8]]
+    if sample_names:
+        lines.append(f"Example products: {', '.join(sample_names)}")
+    return "\n".join(lines) if lines else "No business context provided yet."
+
+
+async def discover_competitor_sites(
+    db: AsyncSession, workspace_id: int, business_context: str, max_candidates: int = 10
+) -> tuple[dict, Optional[int]]:
+    """Ask the workspace's active AI provider to research and propose
+    competitor businesses via its native web search tool. Returns
+    (parsed_json, search_count) — search_count is a best-effort usage
+    figure for the lightweight cost-transparency note, None where the
+    provider's response doesn't expose one. Raises NoActiveProviderError
+    if none configured."""
+    config = await _get_active_config(db, workspace_id)
+    api_key = decrypt_key(config.encrypted_api_key)
+    model = config.model_override or default_model_for(config.provider)
+    prompt = _DISCOVER_PROMPT_TEMPLATE.format(context=business_context, max_candidates=max_candidates)
+
+    if config.provider == "openai":
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key)
+        resp = await client.responses.create(
+            model=model,
+            tools=[{"type": "web_search"}],
+            input=prompt,
+        )
+        return _extract_json_object(resp.output_text), None
+
+    if config.provider == "anthropic":
+        from anthropic import AsyncAnthropic
+
+        client = AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model=model,
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": max_candidates}],
+        )
+        text = "".join(block.text for block in resp.content if block.type == "text")
+        search_count = None
+        server_tool_use = getattr(resp.usage, "server_tool_use", None)
+        if server_tool_use is not None:
+            search_count = getattr(server_tool_use, "web_search_requests", None)
+        return _extract_json_object(text), search_count
+
+    if config.provider == "google":
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+        grounding_tool = types.Tool(google_search=types.GoogleSearch())
+        gen_config = types.GenerateContentConfig(tools=[grounding_tool])
+        resp = await client.aio.models.generate_content(model=model, contents=[prompt], config=gen_config)
+        return _extract_json_object(resp.text), None
 
     raise ValueError(f"Unknown provider: {config.provider}")

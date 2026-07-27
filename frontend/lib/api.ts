@@ -167,6 +167,31 @@ export interface AiProviderConfig {
   created_at: string;
 }
 
+export type CompetitorSiteStatus = "candidate" | "saved" | "dismissed";
+
+export interface CompetitorSite {
+  id: number;
+  discovery_run_id: number;
+  domain: string;
+  name: string | null;
+  confidence_score: number;
+  rationale: string;
+  estimated_product_count: number | null;
+  status: CompetitorSiteStatus;
+}
+
+export interface DiscoveryRun {
+  id: number;
+  workspace_id: number;
+  triggered_at: string;
+  ai_provider: string;
+  model: string;
+  status: "running" | "completed" | "failed";
+  error_message: string | null;
+  search_count: number | null;
+  sites: CompetitorSite[];
+}
+
 export const api = {
   auth: {
     async signup(email: string, password: string, workspaceName: string) {
@@ -237,5 +262,14 @@ export const api = {
       }
       return res.json();
     },
+  },
+  discovery: {
+    createRun: () => request<DiscoveryRun>("/discovery/runs", { method: "POST" }),
+    listRuns: () => request<DiscoveryRun[]>("/discovery/runs"),
+    getRun: (id: number) => request<DiscoveryRun>(`/discovery/runs/${id}`),
+    updateSite: (id: number, status: CompetitorSiteStatus) =>
+      request<CompetitorSite>(`/discovery/sites/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    listSites: (siteStatus?: CompetitorSiteStatus) =>
+      request<CompetitorSite[]>(`/discovery/sites${siteStatus ? `?site_status=${siteStatus}` : ""}`),
   },
 };
