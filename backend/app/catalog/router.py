@@ -95,9 +95,10 @@ async def ai_describe_product(
     db: AsyncSession = Depends(get_db),
 ):
     """Given a product photo, save it and ask the workspace's active AI
-    provider for a suggested title + description. Returns suggestions only —
-    the caller (manual Add Product form) still requires the user to review
-    and submit them; nothing is written to the catalog here."""
+    provider for a suggested title, description, and category. Returns
+    suggestions only — the caller (manual Add Product form) still requires
+    the user to review and submit them; nothing is written to the catalog
+    here."""
     image_url, image_bytes = await save_image(file)
     try:
         result = await ai_client.describe_product_image(
@@ -110,7 +111,12 @@ async def ai_describe_product(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="The AI provider couldn't generate a description for this image. Try again or enter details manually.",
         )
-    return AiDescribeOut(title=result.get("title", ""), description=result.get("description", ""), image_url=image_url)
+    return AiDescribeOut(
+        title=result.get("title", ""),
+        description=result.get("description", ""),
+        category=result.get("category") or None,
+        image_url=image_url,
+    )
 
 
 # ── CSV/XLSX import ─────────────────────────────────────────────────────────

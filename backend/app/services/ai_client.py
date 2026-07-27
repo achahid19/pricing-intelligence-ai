@@ -19,10 +19,16 @@ from app.workspace.models import AiProviderConfig
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 _DESCRIBE_PROMPT = (
-    "You're looking at a photo of a single product for an e-commerce catalog. "
-    "Respond with ONLY a JSON object, no markdown fences, no commentary: "
+    "You're looking at a photo of a single product being entered into a market-research "
+    "product catalog — not a sales listing. Respond with ONLY a JSON object, no markdown "
+    "fences, no commentary: "
     '{"title": "<a concise, specific product title, under 80 characters>", '
-    '"description": "<a 1-3 sentence product description a shopper would find useful>"}'
+    '"description": "<a factual, neutral 1-3 sentence description of what the product actually '
+    'is — its type, materials or components, and function — written so someone can identify '
+    'and research it later, not to sell it. No marketing language (\\"stylish\\", \\"premium\\", '
+    '\\"perfect for\\", etc.)>", '
+    '"category": "<a concise product category, e.g. \'Home & Garden\', \'Electronics\', '
+    '\'Apparel\' — or null if you genuinely can\'t tell>"}'
 )
 
 

@@ -56,4 +56,5 @@ class ImportResultOut(BaseModel):
 class AiDescribeOut(BaseModel):
     title: str
     description: str
+    category: Optional[str] = None
     image_url: str

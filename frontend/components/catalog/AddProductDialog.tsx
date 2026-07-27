@@ -63,6 +63,7 @@ export function AddProductDialog({ onAdded }: { onAdded: () => void }) {
       const result = await api.products.aiDescribe(imageFile);
       setName(result.title);
       setDescription(result.description);
+      if (result.category) setCategory(result.category);
       setImageUrl(result.image_url);
     } catch (err) {
       setGenerateError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
@@ -156,7 +157,9 @@ export function AddProductDialog({ onAdded }: { onAdded: () => void }) {
                 {generating ? "Generating…" : "Generate with AI"}
               </Button>
               <p className="mt-1 text-xs text-slate-soft">
-                {imageFile ? "Suggests a title + description from the photo." : "Add a photo to enable AI suggestions."}
+                {imageFile
+                  ? "Suggests a title, category, and factual description from the photo."
+                  : "Add a photo to enable AI suggestions."}
               </p>
             </div>
           </div>

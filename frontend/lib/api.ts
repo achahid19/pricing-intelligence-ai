@@ -138,6 +138,7 @@ export interface ImportResult {
 export interface AiDescribeResult {
   title: string;
   description: string;
+  category: string | null;
   image_url: string;
 }
 
