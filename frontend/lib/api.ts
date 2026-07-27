@@ -141,6 +141,25 @@ export interface AiDescribeResult {
   image_url: string;
 }
 
+export interface WebsiteImportCandidate {
+  title: string;
+  price: string;
+  currency: string | null;
+  image_url: string | null;
+  description: string | null;
+  brand: string | null;
+  category: string | null;
+  source_url: string;
+  method: "structured" | "ai";
+}
+
+export interface WebsiteImportDiscoverResult {
+  candidates: WebsiteImportCandidate[];
+  pages_scanned: number;
+  ai_calls_used: number;
+  truncated: boolean;
+}
+
 export type AiProvider = "openai" | "google" | "anthropic" | "openrouter";
 
 export type ModelTier = "low" | "medium" | "high";
@@ -234,5 +253,15 @@ export const api = {
       }
       return res.json();
     },
+    discoverFromWebsite: (url: string) =>
+      request<WebsiteImportDiscoverResult>("/products/website-import/discover", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      }),
+    confirmWebsiteImport: (products: WebsiteImportCandidate[]) =>
+      request<ImportResult>("/products/website-import/confirm", {
+        method: "POST",
+        body: JSON.stringify({ products }),
+      }),
   },
 };

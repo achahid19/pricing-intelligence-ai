@@ -5,6 +5,7 @@ import { Package } from "lucide-react";
 
 import { AddProductDialog } from "@/components/catalog/AddProductDialog";
 import { ImportProductsDialog } from "@/components/catalog/ImportProductsDialog";
+import { WebsiteImportDialog } from "@/components/catalog/WebsiteImportDialog";
 import { Button } from "@/components/ui/button";
 import { api, type Product } from "@/lib/api";
 
@@ -35,6 +36,7 @@ export default function CatalogPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <WebsiteImportDialog onImported={load} />
           <ImportProductsDialog onImported={load} />
           <AddProductDialog onAdded={load} />
         </div>

@@ -9,8 +9,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_workspace
+from app.catalog import website_import
 from app.catalog.models import Product
-from app.catalog.schemas import AiDescribeOut, ImportResultOut, ProductCreate, ProductOut, ProductUpdate
+from app.catalog.schemas import (
+    AiDescribeOut,
+    ImportResultOut,
+    ProductCreate,
+    ProductOut,
+    ProductUpdate,
+    WebsiteImportConfirmIn,
+    WebsiteImportDiscoverIn,
+    WebsiteImportDiscoverOut,
+)
 from app.db.database import get_db
 from app.services import ai_client
 from app.services.storage import save_image
@@ -111,6 +121,61 @@ async def ai_describe_product(
             detail="The AI provider couldn't generate a description for this image. Try again or enter details manually.",
         )
     return AiDescribeOut(title=result.get("title", ""), description=result.get("description", ""), image_url=image_url)
+
+
+# ── Website import ───────────────────────────────────────────────────────────
+
+
+@router.post("/website-import/discover", response_model=WebsiteImportDiscoverOut)
+async def discover_website_products(
+    payload: WebsiteImportDiscoverIn,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Scan a website for products (Shopify /products.json, then schema.org
+    JSON-LD via sitemap.xml, AI text-extraction as a fallback). Discovery
+    only — nothing is written to the catalog until /confirm."""
+    try:
+        return await website_import.discover_products(db, workspace.id, payload.url)
+    except website_import.FetchError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/website-import/confirm", response_model=ImportResultOut)
+async def confirm_website_import(
+    payload: WebsiteImportConfirmIn,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create products from the candidates the user reviewed and selected
+    on the discover screen. Same duplicate-name skip logic as CSV import."""
+    existing = await db.execute(select(Product).where(Product.workspace_id == workspace.id))
+    existing_names = {p.name.lower() for p in existing.scalars().all()}
+
+    created = 0
+    skipped: list[str] = []
+    for candidate in payload.products:
+        name = candidate.title.strip()
+        if name.lower() in existing_names:
+            skipped.append(f"{name}: a product with this name already exists")
+            continue
+        product = Product(
+            workspace_id=workspace.id,
+            name=name,
+            price=candidate.price.quantize(Decimal("0.01")),
+            currency=(candidate.currency or "USD").upper()[:3],
+            image_url=candidate.image_url,
+            description=candidate.description,
+            brand=candidate.brand,
+            category=candidate.category,
+            import_source="website_ai",
+        )
+        db.add(product)
+        existing_names.add(name.lower())
+        created += 1
+
+    await db.commit()
+    return ImportResultOut(created=created, skipped=skipped, errors=[])
 
 
 # ── CSV/XLSX import ─────────────────────────────────────────────────────────
