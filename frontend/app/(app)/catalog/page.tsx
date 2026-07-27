@@ -5,7 +5,13 @@ import { Package, Search, Trash2, X } from "lucide-react";
 
 import { ImportProductsDialog } from "@/components/catalog/ImportProductsDialog";
 import { ProductDialog } from "@/components/catalog/ProductDialog";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
 import { api, ApiError, type Product } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 const SOURCE_LABEL: Record<string, string> = {
   manual: "Manual",
@@ -82,54 +88,47 @@ export default function CatalogPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-10">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink">
-            Catalog
-          </h1>
-          <p className="mt-1 text-sm text-slate">
-            {products ? `${products.length} product${products.length === 1 ? "" : "s"}` : "Loading…"}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <ImportProductsDialog onImported={load} />
-          <ProductDialog onSaved={load} />
-        </div>
-      </div>
+      <PageHeader
+        title="Catalog"
+        description={products ? `${products.length} product${products.length === 1 ? "" : "s"}` : "Loading…"}
+        actions={
+          <>
+            <ImportProductsDialog onImported={load} />
+            <ProductDialog onSaved={load} />
+          </>
+        }
+      />
 
       {error && <p className="mt-6 text-sm text-danger">{error}</p>}
 
       {products && products.length > 0 && (
         <div className="mt-6 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[200px]">
+            <div className="relative min-w-[200px] flex-1">
               <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-soft" />
-              <input
+              <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name, SKU, or brand…"
-                className="h-9 w-full rounded-md border border-border bg-paper-raised pr-3 pl-9 text-sm text-ink placeholder:text-slate-soft outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
+                className="h-9 pr-3 pl-9"
               />
             </div>
-            <select
-              value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as SortKey)}
-              className="h-9 rounded-md border border-border bg-paper-raised px-2 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
-            >
+            <Select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="h-9">
               <option value="category">Sort: Category</option>
               <option value="name">Sort: Name A–Z</option>
               <option value="price_asc">Sort: Price low–high</option>
               <option value="price_desc">Sort: Price high–low</option>
-            </select>
+            </Select>
           </div>
 
           {categories.length > 1 && (
             <div className="flex flex-wrap gap-1.5">
               <button
                 onClick={() => setActiveCategory(null)}
-                className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-xs font-medium transition-colors",
                   activeCategory === null ? "bg-accent text-white" : "bg-black/[0.03] text-slate hover:bg-black/[0.06]"
-                }`}
+                )}
               >
                 All
               </button>
@@ -137,9 +136,10 @@ export default function CatalogPage() {
                 <button
                   key={c}
                   onClick={() => setActiveCategory(c === activeCategory ? null : c)}
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-xs font-medium transition-colors",
                     activeCategory === c ? "bg-accent text-white" : "bg-black/[0.03] text-slate hover:bg-black/[0.06]"
-                  }`}
+                  )}
                 >
                   {c}
                 </button>
@@ -166,7 +166,7 @@ export default function CatalogPage() {
       )}
 
       {visibleProducts.length > 0 && (
-        <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-paper-raised">
+        <Card className="mt-4 overflow-x-auto p-0">
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-slate-soft">
@@ -201,9 +201,7 @@ export default function CatalogPage() {
                   </td>
                   <td className="px-4 py-3">
                     {p.category ? (
-                      <span className="rounded-full bg-slate/10 px-2 py-0.5 text-xs font-medium text-slate">
-                        {p.category}
-                      </span>
+                      <Badge tone="neutral">{p.category}</Badge>
                     ) : (
                       <span className="text-xs text-slate-soft">—</span>
                     )}
@@ -263,7 +261,7 @@ export default function CatalogPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
     </div>
   );

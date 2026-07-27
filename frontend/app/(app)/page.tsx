@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Package, Search, Settings, ShieldCheck } from "lucide-react";
 
+import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { Card, cardClassName } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { cn } from "@/lib/utils";
 import { api, type CompetitorSite, type DiscoveryRun, type Product } from "@/lib/api";
 
 function StatCard({
@@ -18,22 +22,42 @@ function StatCard({
   hint: string;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-paper-raised p-4">
+    <Card>
       <div className="flex items-center gap-2 text-slate">
         <Icon className="size-4" />
         <span className="text-xs font-medium">{label}</span>
       </div>
       <p className="mt-2 text-2xl font-semibold tabular-nums text-ink">{value}</p>
       <p className="mt-1 text-xs text-slate-soft">{hint}</p>
-    </div>
+    </Card>
   );
 }
 
-const RUN_STATUS_TONE: Record<string, string> = {
-  completed: "bg-good/10 text-good",
-  running: "bg-accent/10 text-accent",
-  failed: "bg-danger/10 text-danger",
+const RUN_STATUS_TONE: Record<string, BadgeTone> = {
+  completed: "good",
+  running: "accent",
+  failed: "danger",
 };
+
+function QuickActionLink({
+  href,
+  title,
+  description,
+}: {
+  href: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Link href={href} className={cn(cardClassName, "flex items-center justify-between transition-colors hover:bg-black/[0.02]")}>
+      <div>
+        <p className="text-sm font-medium text-ink">{title}</p>
+        <p className="mt-0.5 text-xs text-slate-soft">{description}</p>
+      </div>
+      <ArrowRight className="size-4 shrink-0 text-slate-soft" />
+    </Link>
+  );
+}
 
 export default function Home() {
   const [products, setProducts] = useState<Product[] | null>(null);
@@ -51,8 +75,7 @@ export default function Home() {
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-10">
-      <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink">Welcome back</h1>
-      <p className="mt-1 text-sm text-slate">Here's where things stand across your catalog and competitor research.</p>
+      <PageHeader title="Welcome back" description="Here's where things stand across your catalog and competitor research." />
 
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard
@@ -67,18 +90,16 @@ export default function Home() {
           value={savedSites ? String(savedSites.length) : "…"}
           hint={savedSites && savedSites.length === 0 ? "None saved yet" : "saved for tracking"}
         />
-        <div className="rounded-lg border border-border bg-paper-raised p-4">
+        <Card>
           <div className="flex items-center gap-2 text-slate">
             <Search className="size-4" />
             <span className="text-xs font-medium">Last discovery run</span>
           </div>
           {lastRun ? (
             <>
-              <span
-                className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-medium capitalize ${RUN_STATUS_TONE[lastRun.status] ?? "bg-slate/10 text-slate"}`}
-              >
+              <Badge tone={RUN_STATUS_TONE[lastRun.status] ?? "neutral"} className="mt-2 capitalize">
                 {lastRun.status}
-              </span>
+              </Badge>
               <p className="mt-1.5 text-xs text-slate-soft">{lastRunDate}</p>
             </>
           ) : (
@@ -87,53 +108,43 @@ export default function Home() {
               <p className="mt-1 text-xs text-slate-soft">Never run yet</p>
             </>
           )}
-        </div>
+        </Card>
       </div>
 
       <div className="mt-8 space-y-2">
         <h2 className="text-sm font-medium text-ink">Quick actions</h2>
         {products && products.length === 0 && (
-          <Link
+          <QuickActionLink
             href="/catalog"
-            className="flex items-center justify-between rounded-lg border border-border bg-paper-raised p-4 transition-colors hover:bg-black/[0.02]"
-          >
-            <div>
-              <p className="text-sm font-medium text-ink">Add your first products</p>
-              <p className="mt-0.5 text-xs text-slate-soft">Discovery uses your catalog to find relevant competitors.</p>
-            </div>
-            <ArrowRight className="size-4 shrink-0 text-slate-soft" />
-          </Link>
+            title="Add your first products"
+            description="Discovery uses your catalog to find relevant competitors."
+          />
         )}
         {!lastRun && products && products.length > 0 && (
-          <Link
+          <QuickActionLink
             href="/discovery"
-            className="flex items-center justify-between rounded-lg border border-border bg-paper-raised p-4 transition-colors hover:bg-black/[0.02]"
-          >
-            <div>
-              <p className="text-sm font-medium text-ink">Run competitor discovery</p>
-              <p className="mt-0.5 text-xs text-slate-soft">Find real competitors based on your business context and catalog.</p>
-            </div>
-            <ArrowRight className="size-4 shrink-0 text-slate-soft" />
-          </Link>
+            title="Run competitor discovery"
+            description="Find real competitors based on your business context and catalog."
+          />
         )}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <Link
             href="/catalog"
-            className="flex items-center gap-2 rounded-lg border border-border bg-paper-raised p-3 text-sm font-medium text-ink transition-colors hover:bg-black/[0.02]"
+            className={cn(cardClassName, "flex items-center gap-2 p-3 text-sm font-medium text-ink transition-colors hover:bg-black/[0.02]")}
           >
             <Package className="size-4 text-slate-soft" />
             Catalog
           </Link>
           <Link
             href="/discovery"
-            className="flex items-center gap-2 rounded-lg border border-border bg-paper-raised p-3 text-sm font-medium text-ink transition-colors hover:bg-black/[0.02]"
+            className={cn(cardClassName, "flex items-center gap-2 p-3 text-sm font-medium text-ink transition-colors hover:bg-black/[0.02]")}
           >
             <Search className="size-4 text-slate-soft" />
             Discovery
           </Link>
           <Link
             href="/settings"
-            className="flex items-center gap-2 rounded-lg border border-border bg-paper-raised p-3 text-sm font-medium text-ink transition-colors hover:bg-black/[0.02]"
+            className={cn(cardClassName, "flex items-center gap-2 p-3 text-sm font-medium text-ink transition-colors hover:bg-black/[0.02]")}
           >
             <Settings className="size-4 text-slate-soft" />
             Settings

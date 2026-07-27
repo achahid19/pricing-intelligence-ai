@@ -149,21 +149,31 @@ _DISCOVER_PROMPT_TEMPLATE = (
     "not guessing from memory or training data. Use your web search tool to find actual companies.\n\n"
     "Business context:\n{context}\n\n"
     "Search the web and identify up to {max_candidates} real competitor businesses: companies "
-    "selling similar products or services to a similar customer base. For each one, base your "
-    "confidence on what you actually found, not assumptions.\n\n"
+    "selling similar products or services, at a similar price tier, to a similar customer base — "
+    "weigh the specific products and their descriptions above more heavily than the category "
+    "labels or industry name alone, since two businesses in the same industry can target very "
+    "different customers. Do not include this business's own website as a candidate. For each "
+    "one, base your confidence on what you actually found, not assumptions.\n\n"
     "Respond with ONLY a JSON object, no markdown fences, no commentary before or after: "
     '{{"candidates": [{{"domain": "<bare domain, e.g. example.com, no scheme or path>", '
     '"name": "<company name>", '
     '"confidence": <integer 0-100, how well this is actually a competitor based on what you found>, '
-    '"rationale": "<1-2 sentences explaining the match, referencing something specific you found>", '
+    '"rationale": "<1-2 sentences explaining the match, citing specific products/categories or '
+    'price positioning you compared, not just \\"same industry\\">", '
     '"estimated_product_count": <integer estimate if you can tell from what you found, else null>}}]}}'
 )
 
 
+_MAX_SAMPLE_PRODUCTS = 15
+_MAX_DESCRIPTION_CHARS = 300
+
+
 def build_discovery_context(workspace, products: list) -> str:
     """Renders a workspace's business context + catalog summary into the
-    text block sent to discover_competitor_sites(). Deliberately a summary
-    (categories + a handful of example names), not the full catalog."""
+    text block sent to discover_competitor_sites(). Deliberately a bounded
+    sample with descriptions, not the full catalog — enough for the AI to
+    understand what's actually sold, not just names or category labels,
+    without letting prompt size grow with catalog size."""
     lines = []
     if workspace.objectives_selected:
         lines.append(f"Objectives: {', '.join(workspace.objectives_selected)}")
@@ -175,12 +185,44 @@ def build_discovery_context(workspace, products: list) -> str:
         lines.append(f"Industry/market: {workspace.market}")
     if workspace.website:
         lines.append(f"Business website: {workspace.website}")
+
     categories = sorted({p.category for p in products if p.category})
     if categories:
         lines.append(f"Product categories sold: {', '.join(categories)}")
-    sample_names = [p.name for p in products[:8]]
-    if sample_names:
-        lines.append(f"Example products: {', '.join(sample_names)}")
+
+    prices = [float(p.price) for p in products]
+    if prices:
+        lines.append(f"Price range: {min(prices):.2f}-{max(prices):.2f} {products[0].currency}")
+
+    # One product per category first, so every category the business
+    # sells is actually represented (not just whichever rows happened to
+    # come back first from the DB), then fill remaining slots with other
+    # products up to the cap.
+    sample: list = []
+    seen_categories: set = set()
+    for p in products:
+        if p.category and p.category not in seen_categories:
+            sample.append(p)
+            seen_categories.add(p.category)
+    for p in products:
+        if len(sample) >= _MAX_SAMPLE_PRODUCTS:
+            break
+        if p not in sample:
+            sample.append(p)
+
+    if sample:
+        lines.append("Representative products:")
+        for p in sample:
+            desc = (p.description or "").strip()
+            if len(desc) > _MAX_DESCRIPTION_CHARS:
+                desc = desc[:_MAX_DESCRIPTION_CHARS].rstrip() + "…"
+            entry = f"- {p.name}"
+            if p.category:
+                entry += f" ({p.category})"
+            if desc:
+                entry += f": {desc}"
+            lines.append(entry)
+
     return "\n".join(lines) if lines else "No business context provided yet."
 
 

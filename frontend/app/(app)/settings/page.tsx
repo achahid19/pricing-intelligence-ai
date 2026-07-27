@@ -5,11 +5,14 @@ import { Tooltip } from "@base-ui/react/tooltip";
 import { CheckCircle2, Eye } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Card, cardClassName } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   api,
@@ -24,6 +27,7 @@ import {
 import { COUNTRIES } from "@/lib/countries";
 import { INDUSTRIES } from "@/lib/industries";
 import { TIER_LABEL, TIER_ORDER } from "@/lib/modelTiers";
+import { cn } from "@/lib/utils";
 
 const OTHER_INDUSTRY = "Other";
 const INDUSTRY_OPTIONS = [...INDUSTRIES, OTHER_INDUSTRY];
@@ -81,7 +85,7 @@ export default function SettingsPage() {
       setObjectives(ws.objectives_selected ?? []);
       setObjectivesNote(ws.objectives_note ?? "");
       setCountry(ws.country);
-      if (ws.market && INDUSTRIES.includes(ws.market)) {
+      if (ws.market && (INDUSTRIES as readonly string[]).includes(ws.market)) {
         setIndustry(ws.market);
       } else if (ws.market) {
         setIndustry(OTHER_INDUSTRY);
@@ -203,27 +207,26 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-8 py-10">
-      <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink">Settings</h1>
-      <p className="mt-1 text-sm text-slate">Your AI provider key — used for catalog assist, discovery, and reports.</p>
+      <PageHeader title="Settings" description="Your AI provider key — used for catalog assist, discovery, and reports." />
 
       {active && (
-        <div className="mt-6 flex items-center gap-2 rounded-lg border border-border bg-paper-raised px-4 py-3 text-sm">
+        <Card className="mt-6 flex items-center gap-2 text-sm">
           <CheckCircle2 className="size-4 shrink-0 text-good" />
           <span className="text-ink">
             <span className="font-medium">{PROVIDERS.find((p) => p.value === active.provider)?.label}</span> is active
             {active.model_override && <span className="text-slate"> · {active.model_override}</span>}
           </span>
-        </div>
+        </Card>
       )}
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-4 rounded-lg border border-border bg-paper-raised p-6">
+      <form onSubmit={handleSubmit} className={cn(cardClassName, "mt-6 space-y-4 p-6")}>
         <div className="space-y-1.5">
           <Label htmlFor="provider">Provider</Label>
-          <select
+          <Select
             id="provider"
             value={provider}
             onChange={(e) => handleProviderChange(e.target.value as AiProvider)}
-            className="h-10 w-full rounded-md border border-border bg-paper px-2 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
+            className="w-full"
           >
             {PROVIDERS.map((p) => {
               const hasConfig = configs?.some((c) => c.provider === p.value);
@@ -234,7 +237,7 @@ export default function SettingsPage() {
                 </option>
               );
             })}
-          </select>
+          </Select>
           <p className="text-xs text-slate-soft">
             {configForProvider
               ? `Already configured${configForProvider.is_active ? " and active" : ""} — change the model below without re-entering your key, or enter a new key to rotate it.`
@@ -256,19 +259,19 @@ export default function SettingsPage() {
 
         <div className="space-y-1.5">
           <Label htmlFor="model">Model</Label>
-          <div className="flex items-start gap-2 rounded-md border border-border bg-paper px-3 py-2 text-xs text-slate">
+          <Card className="flex items-start gap-2 p-3 text-xs text-slate">
             <Eye className="mt-0.5 size-3.5 shrink-0 text-accent" />
             <span>
               This workspace uses AI to describe product photos, so it needs a model that can <strong className="text-ink">see images (multimodal)</strong> —
               every option below supports that.
             </span>
-          </div>
+          </Card>
 
-          <select
+          <Select
             id="model"
             value={selectedModelId || defaultModel?.id || ""}
             onChange={(e) => setSelectedModelId(e.target.value)}
-            className="h-10 w-full rounded-md border border-border bg-paper px-2 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
+            className="w-full"
           >
             {modelsByTier.map((group) => (
               <optgroup key={group.tier} label={TIER_LABEL[group.tier]}>
@@ -281,7 +284,7 @@ export default function SettingsPage() {
               </optgroup>
             ))}
             <option value={CUSTOM}>Custom model ID…</option>
-          </select>
+          </Select>
 
           {selectedModelId === CUSTOM ? (
             <div className="space-y-1">
@@ -315,7 +318,7 @@ export default function SettingsPage() {
       {!workspace ? (
         <p className="mt-6 text-sm text-slate-soft">Loading…</p>
       ) : (
-        <form onSubmit={handleContextSubmit} className="mt-6 space-y-6 rounded-lg border border-border bg-paper-raised p-6">
+        <form onSubmit={handleContextSubmit} className={cn(cardClassName, "mt-6 space-y-6 p-6")}>
           <div className="space-y-3">
             <Label>Why are you using this platform?</Label>
             <Tooltip.Provider>
@@ -376,16 +379,16 @@ export default function SettingsPage() {
               <Label htmlFor="report-interval">Report frequency</Label>
               <InfoTooltip text="How often to auto-generate a competitor report once reporting is built. You can always generate one manually in the meantime." />
             </div>
-            <select
+            <Select
               id="report-interval"
               value={reportIntervalHours}
               onChange={(e) => setReportIntervalHours(e.target.value)}
-              className="h-10 w-48 rounded-md border border-border bg-paper px-2 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
+              className="w-48"
             >
               <option value="">Manual only</option>
               <option value="24">Daily</option>
               <option value="168">Weekly</option>
-            </select>
+            </Select>
           </div>
 
           {contextError && <p className="text-sm text-danger">{contextError}</p>}

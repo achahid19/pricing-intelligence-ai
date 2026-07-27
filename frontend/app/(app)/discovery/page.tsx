@@ -3,29 +3,33 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, ExternalLink, Plus, Search, Sparkles, X } from "lucide-react";
 
+import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, cardClassName } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { api, ApiError, type CompetitorSite, type DiscoveryRun } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 function ConfidenceBadge({ score }: { score: number | null }) {
   if (score == null) {
-    return <span className="rounded-full bg-slate/10 px-2 py-0.5 text-xs font-medium text-slate">Added manually</span>;
+    return <Badge tone="neutral">Added manually</Badge>;
   }
   // A qualitative label, not the raw percentage, is the primary signal —
   // this is the AI's own self-reported confidence, not a verified or
   // calibrated metric, so presenting it as a precise number overstates its
   // authority. The percentage is still available, just de-emphasized.
   const label = score >= 75 ? "Strong match" : score >= 50 ? "Possible match" : "Weak match";
-  const tone = score >= 75 ? "bg-good/10 text-good" : score >= 50 ? "bg-slate/10 text-slate" : "bg-accent/10 text-accent";
+  const tone: BadgeTone = score >= 75 ? "good" : score >= 50 ? "neutral" : "accent";
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>
+    <Badge tone={tone}>
       {label}
       <span className="tabular-nums opacity-60">· {score}%</span>
       <InfoTooltip text="The AI's own self-assessed confidence based on what it found during research — not a verified or independently calibrated metric." />
-    </span>
+    </Badge>
   );
 }
 
@@ -43,7 +47,7 @@ function SiteCard({
   onToggleSelect?: (id: number) => void;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-paper-raised p-4">
+    <Card>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           {onToggleSelect && (
@@ -106,7 +110,7 @@ function SiteCard({
           )}
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -249,40 +253,38 @@ export default function DiscoveryPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-10">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink">Discovery</h1>
-          <p className="mt-1 text-sm text-slate">
-            Find real competitors using web search, tailored to your business context and catalog.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-1.5">
-              <label htmlFor="max-candidates" className="text-xs font-medium text-slate">
-                Max competitors
-              </label>
-              <InfoTooltip text="More competitors found means more AI reasoning and web-search cost on this run — your provider bills for both, so higher isn't free." />
+      <PageHeader
+        title="Discovery"
+        description="Find real competitors using web search, tailored to your business context and catalog."
+        actions={
+          <>
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="max-candidates" className="text-xs font-medium text-slate">
+                  Max competitors
+                </label>
+                <InfoTooltip text="More competitors found means more AI reasoning and web-search cost on this run — your provider bills for both, so higher isn't free." />
+              </div>
+              <Input
+                id="max-candidates"
+                type="number"
+                min={1}
+                max={25}
+                value={maxCandidates}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setMaxCandidates(Number.isNaN(next) ? 10 : Math.min(25, Math.max(1, next)));
+                }}
+                className="w-20"
+              />
             </div>
-            <input
-              id="max-candidates"
-              type="number"
-              min={1}
-              max={25}
-              value={maxCandidates}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                setMaxCandidates(Number.isNaN(next) ? 10 : Math.min(25, Math.max(1, next)));
-              }}
-              className="h-10 w-20 rounded-md border border-border bg-paper-raised px-2 text-sm text-ink outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20"
-            />
-          </div>
-          <Button onClick={handleRun} disabled={running}>
-            <Sparkles className="size-4" />
-            {running ? "Researching…" : "Run discovery"}
-          </Button>
-        </div>
-      </div>
+            <Button onClick={handleRun} disabled={running}>
+              <Sparkles className="size-4" />
+              {running ? "Researching…" : "Run discovery"}
+            </Button>
+          </>
+        }
+      />
 
       {running && <p className="mt-4 text-sm text-slate-soft">This can take up to 30 seconds — your AI provider is actively searching the web.</p>}
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
@@ -293,7 +295,7 @@ export default function DiscoveryPage() {
       )}
 
       {latestRun && (
-        <details className="mt-4 rounded-lg border border-border bg-paper-raised">
+        <details className={cn(cardClassName, "mt-4 p-0")}>
           <summary className="cursor-pointer select-none px-4 py-2.5 text-xs font-medium text-slate">
             Business context used for the last run
           </summary>
