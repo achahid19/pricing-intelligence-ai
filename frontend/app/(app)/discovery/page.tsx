@@ -1,47 +1,78 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, ExternalLink, Search, Sparkles, X } from "lucide-react";
+import { Check, ExternalLink, Plus, Search, Sparkles, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { api, ApiError, type CompetitorSite, type DiscoveryRun } from "@/lib/api";
 
-function ConfidenceBadge({ score }: { score: number }) {
+function ConfidenceBadge({ score }: { score: number | null }) {
+  if (score == null) {
+    return <span className="rounded-full bg-slate/10 px-2 py-0.5 text-xs font-medium text-slate">Added manually</span>;
+  }
+  // A qualitative label, not the raw percentage, is the primary signal —
+  // this is the AI's own self-reported confidence, not a verified or
+  // calibrated metric, so presenting it as a precise number overstates its
+  // authority. The percentage is still available, just de-emphasized.
+  const label = score >= 75 ? "Strong match" : score >= 50 ? "Possible match" : "Weak match";
   const tone = score >= 75 ? "bg-good/10 text-good" : score >= 50 ? "bg-slate/10 text-slate" : "bg-accent/10 text-accent";
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${tone}`}>{score}% match</span>;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>
+      {label}
+      <span className="tabular-nums opacity-60">· {score}%</span>
+      <InfoTooltip text="The AI's own self-assessed confidence based on what it found during research — not a verified or independently calibrated metric." />
+    </span>
+  );
 }
 
 function SiteCard({
   site,
   onUpdate,
   updating,
+  selected,
+  onToggleSelect,
 }: {
   site: CompetitorSite;
   onUpdate: (id: number, status: "saved" | "dismissed") => void;
   updating: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: number) => void;
 }) {
   return (
     <div className="rounded-lg border border-border bg-paper-raised p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <a
-              href={`https://${site.domain}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 font-medium text-ink hover:text-accent"
-            >
-              {site.name || site.domain}
-              <ExternalLink className="size-3" />
-            </a>
-            <ConfidenceBadge score={site.confidence_score} />
+        <div className="flex min-w-0 items-start gap-3">
+          {onToggleSelect && (
+            <Checkbox
+              checked={!!selected}
+              onCheckedChange={() => onToggleSelect(site.id)}
+              aria-label={`Select ${site.name || site.domain}`}
+              className="mt-0.5"
+            />
+          )}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={`https://${site.domain}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 font-medium text-ink hover:text-accent"
+              >
+                {site.name || site.domain}
+                <ExternalLink className="size-3" />
+              </a>
+              <ConfidenceBadge score={site.confidence_score} />
+            </div>
+            <p className="mt-0.5 text-xs text-slate-soft">
+              {site.domain}
+              {site.estimated_product_count != null && ` · ~${site.estimated_product_count} products`}
+            </p>
+            {site.rationale && <p className="mt-2 text-sm text-slate">{site.rationale}</p>}
           </div>
-          <p className="mt-0.5 text-xs text-slate-soft">
-            {site.domain}
-            {site.estimated_product_count != null && ` · ~${site.estimated_product_count} products`}
-          </p>
-          <p className="mt-2 text-sm text-slate">{site.rationale}</p>
         </div>
         <div className="flex shrink-0 gap-1.5">
           {site.status === "candidate" && (
@@ -79,16 +110,80 @@ function SiteCard({
   );
 }
 
+function AddCompetitorForm({ onAdded }: { onAdded: () => void }) {
+  const [domain, setDomain] = useState("");
+  const [name, setName] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!domain.trim()) {
+      setError("Enter a domain.");
+      return;
+    }
+    setError(null);
+    setAdding(true);
+    try {
+      await api.discovery.createSite(domain.trim(), name.trim() || undefined);
+      setDomain("");
+      setName("");
+      onAdded();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't add that competitor. Try again.");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-2">
+      <div className="space-y-1">
+        <Label htmlFor="add-domain">Domain</Label>
+        <Input
+          id="add-domain"
+          value={domain}
+          onChange={(e) => setDomain(e.target.value)}
+          placeholder="competitor.com"
+          className="h-9 w-40"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="add-name">Name (optional)</Label>
+        <Input
+          id="add-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Company name"
+          className="h-9 w-40"
+        />
+      </div>
+      <Button type="submit" variant="outline" size="sm" disabled={adding}>
+        <Plus className="size-3.5" />
+        {adding ? "Adding…" : "Add competitor"}
+      </Button>
+      {error && <p className="w-full text-xs text-danger">{error}</p>}
+    </form>
+  );
+}
+
 export default function DiscoveryPage() {
   const [runs, setRuns] = useState<DiscoveryRun[] | null>(null);
+  const [candidates, setCandidates] = useState<CompetitorSite[] | null>(null);
   const [savedSites, setSavedSites] = useState<CompetitorSite[] | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastRunNote, setLastRunNote] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [maxCandidates, setMaxCandidates] = useState(10);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   const load = useCallback(() => {
     api.discovery.listRuns().then(setRuns).catch(() => setRuns([]));
+    // Pending candidates from every past run, not just the latest — an
+    // older run's un-actioned suggestions shouldn't just disappear.
+    api.discovery.listSites("candidate").then(setCandidates).catch(() => setCandidates([]));
     api.discovery.listSites("saved").then(setSavedSites).catch(() => setSavedSites([]));
   }, []);
 
@@ -98,9 +193,15 @@ export default function DiscoveryPage() {
 
   async function handleRun() {
     setError(null);
+    setLastRunNote(null);
     setRunning(true);
     try {
-      await api.discovery.createRun(maxCandidates);
+      const run = await api.discovery.createRun(maxCandidates);
+      if (run.skipped_known_count) {
+        setLastRunNote(
+          `Skipped ${run.skipped_known_count} competitor${run.skipped_known_count === 1 ? "" : "s"} you'd already seen before.`
+        );
+      }
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
@@ -121,8 +222,30 @@ export default function DiscoveryPage() {
     }
   }
 
+  function toggleSelect(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleBulkUpdate(status: "saved" | "dismissed") {
+    setBulkUpdating(true);
+    try {
+      await Promise.all(Array.from(selectedIds).map((id) => api.discovery.updateSite(id, status)));
+      setSelectedIds(new Set());
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't update those competitors. Try again.");
+    } finally {
+      setBulkUpdating(false);
+    }
+  }
+
   const latestRun = runs?.[0];
-  const candidates = latestRun?.sites.filter((s) => s.status === "candidate") ?? [];
+  const allCandidatesSelected = !!candidates && candidates.length > 0 && candidates.every((c) => selectedIds.has(c.id));
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-10">
@@ -163,19 +286,63 @@ export default function DiscoveryPage() {
 
       {running && <p className="mt-4 text-sm text-slate-soft">This can take up to 30 seconds — your AI provider is actively searching the web.</p>}
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
+      {lastRunNote && <p className="mt-4 text-sm text-slate-soft">{lastRunNote}</p>}
 
       {latestRun?.status === "failed" && (
         <p className="mt-4 text-sm text-danger">The last run failed: {latestRun.error_message}</p>
       )}
 
-      {candidates.length > 0 && (
+      {latestRun && (
+        <details className="mt-4 rounded-lg border border-border bg-paper-raised">
+          <summary className="cursor-pointer select-none px-4 py-2.5 text-xs font-medium text-slate">
+            Business context used for the last run
+          </summary>
+          <div className="border-t border-border px-4 py-3">
+            <pre className="whitespace-pre-wrap font-sans text-xs text-slate">{latestRun.context_snapshot.context}</pre>
+            <p className="mt-2 text-xs text-slate-soft">Max competitors requested: {latestRun.context_snapshot.max_candidates}</p>
+          </div>
+        </details>
+      )}
+
+      {candidates && candidates.length > 0 && (
         <div className="mt-6">
-          <h2 className="text-sm font-medium text-ink">
-            {candidates.length} candidate{candidates.length === 1 ? "" : "s"} to review
-          </h2>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={allCandidatesSelected}
+                onCheckedChange={() =>
+                  setSelectedIds(allCandidatesSelected ? new Set() : new Set(candidates.map((c) => c.id)))
+                }
+                aria-label="Select all candidates"
+              />
+              <h2 className="text-sm font-medium text-ink">
+                {candidates.length} candidate{candidates.length === 1 ? "" : "s"} to review
+              </h2>
+            </div>
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-soft">{selectedIds.size} selected</span>
+                <Button variant="outline" size="sm" disabled={bulkUpdating} onClick={() => handleBulkUpdate("saved")}>
+                  <Check className="size-3.5" />
+                  Save all
+                </Button>
+                <Button variant="outline" size="sm" disabled={bulkUpdating} onClick={() => handleBulkUpdate("dismissed")}>
+                  <X className="size-3.5" />
+                  Dismiss all
+                </Button>
+              </div>
+            )}
+          </div>
           <div className="mt-2 space-y-2">
             {candidates.map((site) => (
-              <SiteCard key={site.id} site={site} onUpdate={handleUpdate} updating={updatingId === site.id} />
+              <SiteCard
+                key={site.id}
+                site={site}
+                onUpdate={handleUpdate}
+                updating={updatingId === site.id || bulkUpdating}
+                selected={selectedIds.has(site.id)}
+                onToggleSelect={toggleSelect}
+              />
             ))}
           </div>
         </div>
@@ -193,16 +360,20 @@ export default function DiscoveryPage() {
         </div>
       )}
 
-      {savedSites && savedSites.length > 0 && (
-        <div className="mt-8">
-          <h2 className="text-sm font-medium text-ink">Saved competitors</h2>
-          <div className="mt-2 space-y-2">
+      <div className="mt-8">
+        <h2 className="text-sm font-medium text-ink">Saved competitors</h2>
+        <p className="mt-1 text-xs text-slate-soft">Already know a competitor discovery hasn't found? Add them directly.</p>
+        <div className="mt-2">
+          <AddCompetitorForm onAdded={load} />
+        </div>
+        {savedSites && savedSites.length > 0 && (
+          <div className="mt-4 space-y-2">
             {savedSites.map((site) => (
               <SiteCard key={site.id} site={site} onUpdate={handleUpdate} updating={updatingId === site.id} />
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

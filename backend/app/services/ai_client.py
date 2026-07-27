@@ -200,7 +200,8 @@ async def discover_competitor_sites(
             tools=[{"type": "web_search"}],
             input=prompt,
         )
-        return _extract_json_object(resp.output_text), None
+        search_count = sum(1 for item in resp.output if getattr(item, "type", None) == "web_search_call")
+        return _extract_json_object(resp.output_text), search_count or None
 
     if config.provider == "anthropic":
         from anthropic import AsyncAnthropic
@@ -227,6 +228,12 @@ async def discover_competitor_sites(
         grounding_tool = types.Tool(google_search=types.GoogleSearch())
         gen_config = types.GenerateContentConfig(tools=[grounding_tool])
         resp = await client.aio.models.generate_content(model=model, contents=[prompt], config=gen_config)
-        return _extract_json_object(resp.text), None
+        search_count = None
+        grounding_metadata = getattr(resp.candidates[0], "grounding_metadata", None) if resp.candidates else None
+        if grounding_metadata is not None:
+            queries = getattr(grounding_metadata, "web_search_queries", None)
+            if queries is not None:
+                search_count = len(queries)
+        return _extract_json_object(resp.text), search_count
 
     raise ValueError(f"Unknown provider: {config.provider}")

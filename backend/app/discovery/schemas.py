@@ -13,15 +13,24 @@ class DiscoveryRunCreate(BaseModel):
 
 class CompetitorSiteOut(BaseModel):
     id: int
-    discovery_run_id: int
+    workspace_id: int
+    discovery_run_id: Optional[int]
     domain: str
     name: Optional[str]
-    confidence_score: int
-    rationale: str
+    confidence_score: Optional[int]
+    rationale: Optional[str]
     estimated_product_count: Optional[int]
     status: str
 
     model_config = {"from_attributes": True}
+
+
+class CompetitorSiteCreate(BaseModel):
+    """Manually add a known competitor, skipping AI discovery entirely —
+    trusted as-is, saved directly rather than starting as a candidate."""
+
+    domain: str = Field(min_length=1, max_length=255)
+    name: Optional[str] = Field(default=None, max_length=255)
 
 
 class DiscoveryRunOut(BaseModel):
@@ -33,6 +42,8 @@ class DiscoveryRunOut(BaseModel):
     status: str
     error_message: Optional[str]
     search_count: Optional[int] = None
+    skipped_known_count: Optional[int] = None
+    context_snapshot: dict
     sites: list[CompetitorSiteOut] = []
 
     model_config = {"from_attributes": True}

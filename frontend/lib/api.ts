@@ -171,11 +171,12 @@ export type CompetitorSiteStatus = "candidate" | "saved" | "dismissed";
 
 export interface CompetitorSite {
   id: number;
-  discovery_run_id: number;
+  workspace_id: number;
+  discovery_run_id: number | null;
   domain: string;
   name: string | null;
-  confidence_score: number;
-  rationale: string;
+  confidence_score: number | null;
+  rationale: string | null;
   estimated_product_count: number | null;
   status: CompetitorSiteStatus;
 }
@@ -189,6 +190,8 @@ export interface DiscoveryRun {
   status: "running" | "completed" | "failed";
   error_message: string | null;
   search_count: number | null;
+  skipped_known_count: number | null;
+  context_snapshot: { context: string; max_candidates: number };
   sites: CompetitorSite[];
 }
 
@@ -275,5 +278,7 @@ export const api = {
       request<CompetitorSite>(`/discovery/sites/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
     listSites: (siteStatus?: CompetitorSiteStatus) =>
       request<CompetitorSite[]>(`/discovery/sites${siteStatus ? `?site_status=${siteStatus}` : ""}`),
+    createSite: (domain: string, name?: string) =>
+      request<CompetitorSite>("/discovery/sites", { method: "POST", body: JSON.stringify({ domain, name }) }),
   },
 };

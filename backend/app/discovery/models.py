@@ -38,24 +38,34 @@ class DiscoveryRun(Base):
 
 class CompetitorSite(Base):
     """
-    A candidate competitor domain proposed by a DiscoveryRun. `status`
-    starts "candidate" — the user reviews and either "saves" (tracked going
-    forward, the seed for Phase 2's product-level discovery) or "dismisses"
-    it. Confidence/rationale come straight from the AI's own JSON output,
-    never recomputed — this is a proposal, not a verified fact.
+    A competitor domain — either proposed by a DiscoveryRun (AI-sourced,
+    `discovery_run_id` set, confidence/rationale come from the AI) or added
+    directly by the user (`discovery_run_id` NULL, confidence/rationale
+    absent — a manual entry is trusted as-is, not a proposal to review).
+    `workspace_id` is denormalized here (not just reachable via the run)
+    specifically so manually-added sites — which have no run at all — can
+    still be scoped and deduplicated per workspace.
+
+    `status` starts "candidate" for AI proposals — the user reviews and
+    either "saves" (tracked going forward, the seed for Phase 2's
+    product-level discovery) or "dismisses" it. Manual entries start
+    "saved" directly, skipping review of your own deliberate input.
     """
     __tablename__ = "competitor_sites"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    discovery_run_id: Mapped[int] = mapped_column(
-        ForeignKey("discovery_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    workspace_id: Mapped[int] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    discovery_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("discovery_runs.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
     domain: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    confidence_score: Mapped[int] = mapped_column(Integer, nullable=False)  # 0-100
-    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0-100, AI-sourced only
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)  # AI-sourced only
     estimated_product_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="candidate")  # candidate|saved|dismissed
 
-    discovery_run: Mapped["DiscoveryRun"] = relationship(back_populates="sites")
+    discovery_run: Mapped["DiscoveryRun | None"] = relationship(back_populates="sites")
