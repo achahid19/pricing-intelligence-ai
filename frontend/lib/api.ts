@@ -144,7 +144,7 @@ export interface AiDescribeResult {
   image_url: string;
 }
 
-export type AiProvider = "openai" | "google" | "anthropic" | "openrouter";
+export type AiProvider = "openai" | "google" | "anthropic";
 
 export type ModelTier = "low" | "medium" | "high";
 

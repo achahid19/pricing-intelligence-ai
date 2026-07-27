@@ -184,56 +184,6 @@ MODEL_CATALOG: dict[str, list[ModelInfo]] = {
             "vision": True,
         },
     ],
-    # OpenRouter proxies hundreds of models behind one key. This curated list
-    # deliberately spans real providers (not just re-listing the three
-    # above) since that's OpenRouter's actual value: one key, many vendors —
-    # including open-weight models with no native provider option in this
-    # app at all.
-    "openrouter": [
-        {
-            "id": "qwen/qwen3-vl-8b-instruct",
-            "label": "Qwen3 VL 8B",
-            "tier": "low",
-            "blurb": "Open-weight vision model, lowest cost of any option here.",
-            "vision": True,
-        },
-        {
-            "id": "qwen/qwen2.5-vl-72b-instruct",
-            "label": "Qwen2.5 VL 72B",
-            "tier": "low",
-            "blurb": "Larger open-weight vision model, still very cheap.",
-            "vision": True,
-        },
-        {
-            "id": "google/gemini-3.6-flash",
-            "label": "Gemini 3.6 Flash",
-            "tier": "medium",
-            "blurb": "Same model as the native Google option, via OpenRouter's key.",
-            "vision": True,
-            "default": True,
-        },
-        {
-            "id": "openai/gpt-5.6-terra",
-            "label": "GPT-5.6 Terra",
-            "tier": "medium",
-            "blurb": "Same model as the native OpenAI option, via OpenRouter's key.",
-            "vision": True,
-        },
-        {
-            "id": "anthropic/claude-sonnet-5",
-            "label": "Claude Sonnet 5",
-            "tier": "high",
-            "blurb": "Higher-reasoning option, billed through the same OpenRouter key.",
-            "vision": True,
-        },
-        {
-            "id": "anthropic/claude-opus-4-8",
-            "label": "Claude Opus 4.8",
-            "tier": "high",
-            "blurb": "Most capable option available through OpenRouter here.",
-            "vision": True,
-        },
-    ],
 }
 
 

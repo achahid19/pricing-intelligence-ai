@@ -16,8 +16,6 @@ from app.services.model_catalog import default_model_for
 from app.workspace.encryption import decrypt_key
 from app.workspace.models import AiProviderConfig
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-
 _DESCRIBE_PROMPT = (
     "You're looking at a photo of a single product being entered into a market-research "
     "product catalog — not a sales listing. Respond with ONLY a JSON object, no markdown "
@@ -71,14 +69,10 @@ async def describe_product_image(
     model = config.model_override or default_model_for(config.provider)
     b64 = base64.b64encode(image_bytes).decode()
 
-    if config.provider in ("openai", "openrouter"):
+    if config.provider == "openai":
         from openai import AsyncOpenAI
 
-        # OpenRouter is a drop-in OpenAI-API-compatible endpoint — same SDK,
-        # same request/response shape (including vision), just a different
-        # base_url and provider-prefixed model IDs (e.g. "google/gemini-3.6-flash").
-        base_url = OPENROUTER_BASE_URL if config.provider == "openrouter" else None
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        client = AsyncOpenAI(api_key=api_key)
         resp = await client.chat.completions.create(
             model=model,
             messages=[

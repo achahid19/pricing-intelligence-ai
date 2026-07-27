@@ -3,7 +3,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-Provider = Literal["openai", "google", "anthropic", "openrouter"]
+Provider = Literal["openai", "google", "anthropic"]
 
 # Known checkbox options shown at onboarding — deliberately not a hard
 # enum, "anything else" is captured in objectives_note instead of forcing
