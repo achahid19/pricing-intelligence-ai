@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, ExternalLink, Plus, Search, Sparkles, X } from "lucide-react";
+import Link from "next/link";
+import { Check, ExternalLink, Package, Plus, Search, Sparkles, X } from "lucide-react";
 
-import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, cardClassName } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfidenceBadge } from "@/components/discovery/ConfidenceBadge";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,24 +15,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { api, ApiError, type CompetitorSite, type DiscoveryRun } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-function ConfidenceBadge({ score }: { score: number | null }) {
-  if (score == null) {
-    return <Badge tone="neutral">Added manually</Badge>;
-  }
-  // A qualitative label, not the raw percentage, is the primary signal —
-  // this is the AI's own self-reported confidence, not a verified or
-  // calibrated metric, so presenting it as a precise number overstates its
-  // authority. The percentage is still available, just de-emphasized.
-  const label = score >= 75 ? "Strong match" : score >= 50 ? "Possible match" : "Weak match";
-  const tone: BadgeTone = score >= 75 ? "good" : score >= 50 ? "neutral" : "accent";
-  return (
-    <Badge tone={tone}>
-      {label}
-      <span className="tabular-nums opacity-60">· {score}%</span>
-      <InfoTooltip text="The AI's own self-assessed confidence based on what it found during research — not a verified or independently calibrated metric." />
-    </Badge>
-  );
-}
+const SITE_CONFIDENCE_TOOLTIP =
+  "The AI's own self-assessed confidence based on what it found during research — not a verified or independently calibrated metric.";
 
 function SiteCard({
   site,
@@ -69,7 +54,7 @@ function SiteCard({
                 {site.name || site.domain}
                 <ExternalLink className="size-3" />
               </a>
-              <ConfidenceBadge score={site.confidence_score} />
+              <ConfidenceBadge score={site.confidence_score} tooltip={SITE_CONFIDENCE_TOOLTIP} />
             </div>
             <p className="mt-0.5 text-xs text-slate-soft">
               {site.domain}
@@ -100,13 +85,22 @@ function SiteCard({
             </>
           )}
           {site.status === "saved" && (
-            <button
-              onClick={() => onUpdate(site.id, "dismissed")}
-              disabled={updating}
-              className="rounded-md px-2 py-1 text-xs font-medium text-slate transition-colors hover:bg-black/[0.03]"
-            >
-              Remove
-            </button>
+            <>
+              <Link
+                href={`/discovery/${site.id}`}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate transition-colors hover:bg-black/[0.03] hover:text-ink"
+              >
+                <Package className="size-3.5" />
+                View products
+              </Link>
+              <button
+                onClick={() => onUpdate(site.id, "dismissed")}
+                disabled={updating}
+                className="rounded-md px-2 py-1 text-xs font-medium text-slate transition-colors hover:bg-black/[0.03]"
+              >
+                Remove
+              </button>
+            </>
           )}
         </div>
       </div>

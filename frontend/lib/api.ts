@@ -195,6 +195,34 @@ export interface DiscoveryRun {
   sites: CompetitorSite[];
 }
 
+export interface CompetitorProduct {
+  id: number;
+  workspace_id: number;
+  competitor_site_id: number;
+  title: string;
+  price: string | null;
+  currency: string | null;
+  url: string;
+  image_url: string | null;
+  description: string | null;
+  discovered_at: string;
+  updated_at: string;
+}
+
+export type ProductMatchStatus = "candidate" | "confirmed" | "dismissed";
+
+export interface ProductMatch {
+  id: number;
+  workspace_id: number;
+  product_id: number;
+  competitor_product_id: number;
+  match_method: "manual" | "ai_auto";
+  confidence: number | null;
+  rationale: string | null;
+  status: ProductMatchStatus;
+  created_at: string;
+}
+
 export const api = {
   auth: {
     async signup(email: string, password: string, workspaceName: string) {
@@ -280,5 +308,22 @@ export const api = {
       request<CompetitorSite[]>(`/discovery/sites${siteStatus ? `?site_status=${siteStatus}` : ""}`),
     createSite: (domain: string, name?: string) =>
       request<CompetitorSite>("/discovery/sites", { method: "POST", body: JSON.stringify({ domain, name }) }),
+    getSite: (siteId: number) => request<CompetitorSite>(`/discovery/sites/${siteId}`),
+    discoverProducts: (siteId: number, maxProducts: number) =>
+      request<CompetitorProduct[]>(`/discovery/sites/${siteId}/products`, {
+        method: "POST",
+        body: JSON.stringify({ max_products: maxProducts }),
+      }),
+    listProducts: (siteId: number) => request<CompetitorProduct[]>(`/discovery/sites/${siteId}/products`),
+    autoMatch: (siteId: number) =>
+      request<ProductMatch[]>(`/discovery/sites/${siteId}/auto-match`, { method: "POST" }),
+    listMatches: (siteId: number) => request<ProductMatch[]>(`/discovery/sites/${siteId}/matches`),
+    createMatch: (productId: number, competitorProductId: number) =>
+      request<ProductMatch>("/discovery/matches", {
+        method: "POST",
+        body: JSON.stringify({ product_id: productId, competitor_product_id: competitorProductId }),
+      }),
+    updateMatch: (matchId: number, status: "confirmed" | "dismissed") =>
+      request<ProductMatch>(`/discovery/matches/${matchId}`, { method: "PATCH", body: JSON.stringify({ status }) }),
   },
 };

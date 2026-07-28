@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -51,3 +52,51 @@ class DiscoveryRunOut(BaseModel):
 
 class CompetitorSiteUpdate(BaseModel):
     status: Literal["saved", "dismissed"]
+
+
+class CompetitorProductOut(BaseModel):
+    id: int
+    workspace_id: int
+    competitor_site_id: int
+    title: str
+    price: Optional[Decimal]
+    currency: Optional[str]
+    url: str
+    image_url: Optional[str]
+    description: Optional[str]
+    discovered_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ProductDiscoveryCreate(BaseModel):
+    # Same reasoning as DiscoveryRunCreate.max_candidates — a hard safety
+    # cap, not just a UI suggestion.
+    max_products: int = Field(default=15, ge=1, le=25)
+
+
+class ProductMatchOut(BaseModel):
+    id: int
+    workspace_id: int
+    product_id: int
+    competitor_product_id: int
+    match_method: str
+    confidence: Optional[int]
+    rationale: Optional[str]
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ProductMatchCreate(BaseModel):
+    """Manual match, created directly as confirmed — no AI judgment to
+    review, same as a manually-added CompetitorSite."""
+
+    product_id: int
+    competitor_product_id: int
+
+
+class ProductMatchUpdate(BaseModel):
+    status: Literal["confirmed", "dismissed"]

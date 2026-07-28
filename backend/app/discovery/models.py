@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -68,4 +68,95 @@ class CompetitorSite(Base):
     estimated_product_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="candidate")  # candidate|saved|dismissed
 
+    # Cooldown timestamps for the two per-site AI actions Phase 2 adds —
+    # same "cheapest guard against a double-click burning real cost" logic
+    # as DISCOVERY_COOLDOWN_SECONDS, just scoped per-site instead of
+    # per-workspace since these actions operate on one site at a time.
+    products_discovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_auto_match_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     discovery_run: Mapped["DiscoveryRun | None"] = relationship(back_populates="sites")
+    products: Mapped[list["CompetitorProduct"]] = relationship(
+        back_populates="competitor_site", cascade="all, delete-orphan"
+    )
+
+
+class CompetitorProduct(Base):
+    """
+    A product observed on a saved competitor's site via
+    ai_client.discover_competitor_products(). Unlike CompetitorSite, there's
+    no candidate/saved/dismissed review status here — these are just
+    observed facts to browse and match against, not proposals to accept or
+    reject. workspace_id is denormalized for the same reason as
+    CompetitorSite: simple per-workspace queries without joining through
+    the site. Re-running discovery upserts by (competitor_site_id, url)
+    rather than duplicating, and never deletes rows no longer found — a
+    product temporarily unlisted isn't necessarily discontinued.
+    """
+    __tablename__ = "competitor_products"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    competitor_site_id: Mapped[int] = mapped_column(
+        ForeignKey("competitor_sites.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    discovered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    competitor_site: Mapped["CompetitorSite"] = relationship(back_populates="products")
+    matches: Mapped[list["ProductMatch"]] = relationship(
+        back_populates="competitor_product", cascade="all, delete-orphan"
+    )
+
+
+class ProductMatch(Base):
+    """
+    A pairing between one of the workspace's own products and a
+    CompetitorProduct. `status` mirrors CompetitorSite's candidate/saved/
+    dismissed vocabulary (as "candidate"/"confirmed"/"dismissed") rather
+    than a flatter active/dismissed — an ai_auto proposal needs a pending
+    state distinct from user-confirmed, same reasoning that already
+    justified CompetitorSite.status. Manual matches (drag-and-drop) are
+    created directly as "confirmed" — there's no AI judgment to review,
+    same as a manually-added CompetitorSite skipping the candidate stage.
+    """
+    __tablename__ = "product_matches"
+    __table_args__ = (UniqueConstraint("product_id", "competitor_product_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    competitor_product_id: Mapped[int] = mapped_column(
+        ForeignKey("competitor_products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    match_method: Mapped[str] = mapped_column(Text, nullable=False)  # manual|ai_auto
+    confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0-100, ai_auto only
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)  # ai_auto only
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="candidate")  # candidate|confirmed|dismissed
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    competitor_product: Mapped["CompetitorProduct"] = relationship(back_populates="matches")

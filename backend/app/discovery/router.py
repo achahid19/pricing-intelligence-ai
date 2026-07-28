@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -8,13 +9,18 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.dependencies import get_current_workspace
 from app.catalog.models import Product
-from app.discovery.models import CompetitorSite, DiscoveryRun
+from app.discovery.models import CompetitorProduct, CompetitorSite, DiscoveryRun, ProductMatch
 from app.discovery.schemas import (
+    CompetitorProductOut,
     CompetitorSiteCreate,
     CompetitorSiteOut,
     CompetitorSiteUpdate,
     DiscoveryRunCreate,
     DiscoveryRunOut,
+    ProductDiscoveryCreate,
+    ProductMatchCreate,
+    ProductMatchOut,
+    ProductMatchUpdate,
 )
 from app.db.database import get_db
 from app.services import ai_client
@@ -25,16 +31,50 @@ router = APIRouter()
 
 # No queue/rate-limit middleware in this app yet — this is the cheapest
 # possible guard against a stuck retry loop or an impatient double-click
-# burning real AI-provider cost with zero server-side protection.
+# burning real AI-provider cost with zero server-side protection. Shared
+# across every AI-cost action in this module (discovery runs, per-site
+# product discovery, auto-match) — same guard, same reasoning, not a
+# separate tunable per action.
 DISCOVERY_COOLDOWN_SECONDS = 30
+
+
+def _check_cooldown(last_at: Optional[datetime]) -> None:
+    if last_at is None:
+        return
+    elapsed = (datetime.now(timezone.utc) - last_at).total_seconds()
+    if elapsed < DISCOVERY_COOLDOWN_SECONDS:
+        wait_seconds = int(DISCOVERY_COOLDOWN_SECONDS - elapsed) + 1
+        raise HTTPException(
+            status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Please wait {wait_seconds}s before running this again.",
+        )
 
 
 def _normalize_domain(raw: str) -> str:
     """Strip scheme, a leading www., and any trailing path/slash — so
     "https://www.example.com/" and "example.com" are recognized as the same
-    competitor rather than creating a duplicate row."""
+    competitor rather than creating a duplicate row. Also cuts at the first
+    whitespace/parenthesis: the AI sometimes appends a trailing annotation
+    after the bare domain (e.g. "genious.ma (genious communications)") — a
+    valid domain never contains either, so this is safe to cut on."""
     domain = raw.strip().lower().removeprefix("https://").removeprefix("http://").removeprefix("www.")
-    return domain.split("/")[0]
+    domain = domain.split("/")[0]
+    return re.split(r"[\s(]", domain, maxsplit=1)[0]
+
+
+async def _get_saved_site(db: AsyncSession, site_id: int, workspace_id: int) -> CompetitorSite:
+    result = await db.execute(
+        select(CompetitorSite).where(CompetitorSite.id == site_id, CompetitorSite.workspace_id == workspace_id)
+    )
+    site = result.scalars().first()
+    if site is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Competitor site not found")
+    if site.status != "saved":
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Save this competitor before discovering its products.",
+        )
+    return site
 
 
 def _to_run_out(
@@ -73,15 +113,7 @@ async def create_discovery_run(
         .order_by(DiscoveryRun.triggered_at.desc())
         .limit(1)
     )
-    last_triggered_at = last_run_result.scalars().first()
-    if last_triggered_at is not None:
-        elapsed = (datetime.now(timezone.utc) - last_triggered_at).total_seconds()
-        if elapsed < DISCOVERY_COOLDOWN_SECONDS:
-            wait_seconds = int(DISCOVERY_COOLDOWN_SECONDS - elapsed) + 1
-            raise HTTPException(
-                status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Please wait {wait_seconds}s before running discovery again.",
-            )
+    _check_cooldown(last_run_result.scalars().first())
 
     active_result = await db.execute(
         select(AiProviderConfig).where(
@@ -270,3 +302,287 @@ async def list_competitor_sites(
         query = query.where(CompetitorSite.status == site_status)
     result = await db.execute(query.order_by(CompetitorSite.confidence_score.desc()))
     return result.scalars().all()
+
+
+@router.get("/sites/{site_id}", response_model=CompetitorSiteOut)
+async def get_competitor_site(
+    site_id: int,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(CompetitorSite).where(CompetitorSite.id == site_id, CompetitorSite.workspace_id == workspace.id)
+    )
+    site = result.scalars().first()
+    if site is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Competitor site not found")
+    return site
+
+
+@router.post("/sites/{site_id}/products", response_model=list[CompetitorProductOut])
+async def discover_products_for_site(
+    site_id: int,
+    payload: ProductDiscoveryCreate,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ask the workspace's active AI provider to browse this saved
+    competitor's site and list real products it found. Upserts by
+    (competitor_site_id, url) — re-running updates existing rows rather
+    than duplicating, and never deletes rows no longer found."""
+    site = await _get_saved_site(db, site_id, workspace.id)
+    _check_cooldown(site.products_discovered_at)
+
+    try:
+        result, _search_count = await ai_client.discover_competitor_products(
+            db, workspace.id, site.domain, site.name, max_products=payload.max_products
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail=f"The AI provider couldn't complete product discovery: {str(exc)[:300]}",
+        )
+
+    existing_result = await db.execute(
+        select(CompetitorProduct).where(CompetitorProduct.competitor_site_id == site.id)
+    )
+    existing_by_url = {p.url: p for p in existing_result.scalars().all()}
+
+    for candidate in result.get("products", [])[: payload.max_products]:
+        title = (candidate.get("title") or "").strip()
+        url = (candidate.get("url") or "").strip()
+        if not title or not url:
+            continue
+        try:
+            price = candidate.get("price")
+            price = round(float(price), 2) if price is not None else None
+        except (TypeError, ValueError):
+            price = None
+
+        existing = existing_by_url.get(url)
+        if existing is not None:
+            existing.title = title
+            existing.price = price
+            existing.currency = candidate.get("currency")
+            existing.description = candidate.get("description")
+        else:
+            product = CompetitorProduct(
+                workspace_id=workspace.id,
+                competitor_site_id=site.id,
+                title=title,
+                price=price,
+                currency=candidate.get("currency"),
+                url=url,
+                description=candidate.get("description"),
+            )
+            db.add(product)
+            existing_by_url[url] = product
+
+    site.products_discovered_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    refreshed = await db.execute(
+        select(CompetitorProduct)
+        .where(CompetitorProduct.competitor_site_id == site.id)
+        .order_by(CompetitorProduct.discovered_at.desc())
+    )
+    return refreshed.scalars().all()
+
+
+@router.get("/sites/{site_id}/products", response_model=list[CompetitorProductOut])
+async def list_products_for_site(
+    site_id: int,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    # Existence/ownership check only — a site doesn't need to be "saved"
+    # to list whatever products it may already have.
+    site_result = await db.execute(
+        select(CompetitorSite).where(CompetitorSite.id == site_id, CompetitorSite.workspace_id == workspace.id)
+    )
+    if site_result.scalars().first() is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Competitor site not found")
+
+    result = await db.execute(
+        select(CompetitorProduct)
+        .where(CompetitorProduct.competitor_site_id == site_id)
+        .order_by(CompetitorProduct.discovered_at.desc())
+    )
+    return result.scalars().all()
+
+
+@router.post("/sites/{site_id}/auto-match", response_model=list[ProductMatchOut])
+async def auto_match_site_products(
+    site_id: int,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Propose matches between this competitor's discovered products and
+    the workspace's own catalog. Writes ProductMatch rows as "candidate"
+    for the user to confirm/dismiss — mirrors CompetitorSite's own
+    candidate review flow."""
+    site = await _get_saved_site(db, site_id, workspace.id)
+    _check_cooldown(site.last_auto_match_at)
+
+    competitor_products_result = await db.execute(
+        select(CompetitorProduct).where(CompetitorProduct.competitor_site_id == site.id)
+    )
+    competitor_products = competitor_products_result.scalars().all()
+    if not competitor_products:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Discover this competitor's products before running auto-match.",
+        )
+
+    own_products_result = await db.execute(select(Product).where(Product.workspace_id == workspace.id))
+    own_products = own_products_result.scalars().all()
+    if not own_products:
+        raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail="Your catalog is empty.")
+
+    try:
+        result, _search_count = await ai_client.match_products(db, workspace.id, own_products, competitor_products)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail=f"The AI provider couldn't complete matching: {str(exc)[:300]}",
+        )
+
+    existing_result = await db.execute(
+        select(ProductMatch).where(ProductMatch.competitor_product_id.in_([p.id for p in competitor_products]))
+    )
+    existing_by_pair = {(m.product_id, m.competitor_product_id): m for m in existing_result.scalars().all()}
+
+    for match in result.get("matches", []):
+        try:
+            comp_idx = int(match["competitor_product_index"])
+            prod_idx = int(match["product_index"])
+            confidence = max(0, min(100, int(match.get("confidence", 0))))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (0 <= comp_idx < len(competitor_products)) or not (0 <= prod_idx < len(own_products)):
+            continue
+        competitor_product = competitor_products[comp_idx]
+        product = own_products[prod_idx]
+        rationale = match.get("rationale") or ""
+
+        pair_key = (product.id, competitor_product.id)
+        existing = existing_by_pair.get(pair_key)
+        if existing is not None:
+            if existing.status == "candidate":
+                existing.confidence = confidence
+                existing.rationale = rationale
+            # A confirmed or dismissed pair is left alone — a fresh AI
+            # proposal shouldn't silently overwrite a decision already made.
+            continue
+        new_match = ProductMatch(
+            workspace_id=workspace.id,
+            product_id=product.id,
+            competitor_product_id=competitor_product.id,
+            match_method="ai_auto",
+            confidence=confidence,
+            rationale=rationale,
+            status="candidate",
+        )
+        db.add(new_match)
+        existing_by_pair[pair_key] = new_match
+
+    site.last_auto_match_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    refreshed = await db.execute(
+        select(ProductMatch)
+        .join(CompetitorProduct, ProductMatch.competitor_product_id == CompetitorProduct.id)
+        .where(CompetitorProduct.competitor_site_id == site.id)
+    )
+    return refreshed.scalars().all()
+
+
+@router.get("/sites/{site_id}/matches", response_model=list[ProductMatchOut])
+async def list_matches_for_site(
+    site_id: int,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    site_result = await db.execute(
+        select(CompetitorSite).where(CompetitorSite.id == site_id, CompetitorSite.workspace_id == workspace.id)
+    )
+    if site_result.scalars().first() is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Competitor site not found")
+
+    result = await db.execute(
+        select(ProductMatch)
+        .join(CompetitorProduct, ProductMatch.competitor_product_id == CompetitorProduct.id)
+        .where(CompetitorProduct.competitor_site_id == site_id)
+    )
+    return result.scalars().all()
+
+
+@router.post("/matches", response_model=ProductMatchOut, status_code=http_status.HTTP_201_CREATED)
+async def create_manual_match(
+    payload: ProductMatchCreate,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually pair one of the workspace's own products with a competitor
+    product (drag-and-drop drop target calls this) — created directly as
+    "confirmed", no AI judgment to review, same as a manually-added
+    CompetitorSite."""
+    product_result = await db.execute(
+        select(Product).where(Product.id == payload.product_id, Product.workspace_id == workspace.id)
+    )
+    if product_result.scalars().first() is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    competitor_product_result = await db.execute(
+        select(CompetitorProduct).where(
+            CompetitorProduct.id == payload.competitor_product_id,
+            CompetitorProduct.workspace_id == workspace.id,
+        )
+    )
+    if competitor_product_result.scalars().first() is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Competitor product not found")
+
+    existing_result = await db.execute(
+        select(ProductMatch).where(
+            ProductMatch.product_id == payload.product_id,
+            ProductMatch.competitor_product_id == payload.competitor_product_id,
+        )
+    )
+    existing = existing_result.scalars().first()
+    if existing is not None:
+        existing.status = "confirmed"
+        existing.match_method = "manual"
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+
+    match = ProductMatch(
+        workspace_id=workspace.id,
+        product_id=payload.product_id,
+        competitor_product_id=payload.competitor_product_id,
+        match_method="manual",
+        status="confirmed",
+    )
+    db.add(match)
+    await db.commit()
+    await db.refresh(match)
+    return match
+
+
+@router.patch("/matches/{match_id}", response_model=ProductMatchOut)
+async def update_match(
+    match_id: int,
+    payload: ProductMatchUpdate,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ProductMatch).where(ProductMatch.id == match_id, ProductMatch.workspace_id == workspace.id)
+    )
+    match = result.scalars().first()
+    if match is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Match not found")
+    match.status = payload.status
+    await db.commit()
+    await db.refresh(match)
+    return match
