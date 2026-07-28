@@ -206,11 +206,13 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-8 py-10">
+    <div className="mx-auto max-w-5xl px-8 py-10">
       <PageHeader title="Settings" description="Your AI provider key — used for catalog assist, discovery, and reports." />
 
+      <div className="mt-6 grid grid-cols-1 items-start gap-8 lg:grid-cols-2">
+      <div>
       {active && (
-        <Card className="mt-6 flex items-center gap-2 text-sm">
+        <Card className="mb-6 flex items-center gap-2 text-sm">
           <CheckCircle2 className="size-4 shrink-0 text-good" />
           <span className="text-ink">
             <span className="font-medium">{PROVIDERS.find((p) => p.value === active.provider)?.label}</span> is active
@@ -219,7 +221,7 @@ export default function SettingsPage() {
         </Card>
       )}
 
-      <form onSubmit={handleSubmit} className={cn(cardClassName, "mt-6 space-y-4 p-6")}>
+      <form onSubmit={handleSubmit} className={cn(cardClassName, "space-y-4 p-6")}>
         <div className="space-y-1.5">
           <Label htmlFor="provider">Provider</Label>
           <Select
@@ -309,8 +311,10 @@ export default function SettingsPage() {
           {saving ? "Saving…" : "Save"}
         </Button>
       </form>
+      </div>
 
-      <h2 className="mt-10 font-[family-name:var(--font-display)] text-xl font-semibold text-ink">Business context</h2>
+      <div>
+      <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink">Business context</h2>
       <p className="mt-1 text-sm text-slate">
         What discovery and reports are built around — set at onboarding, editable any time as your business changes.
       </p>
@@ -399,6 +403,8 @@ export default function SettingsPage() {
           </Button>
         </form>
       )}
+      </div>
+      </div>
     </div>
   );
 }

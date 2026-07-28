@@ -174,8 +174,11 @@ function AddCompetitorForm({ onAdded, relationshipType }: { onAdded: () => void;
   );
 }
 
+type SiteView = "candidates" | "saved" | "dismissed";
+
 export default function DiscoveryPage() {
   const [mode, setMode] = useState<DiscoveryMode>("competitor");
+  const [view, setView] = useState<SiteView>("candidates");
   const [showResellerMode, setShowResellerMode] = useState(false);
   const [runs, setRuns] = useState<DiscoveryRun[] | null>(null);
   const [candidates, setCandidates] = useState<CompetitorSite[] | null>(null);
@@ -211,6 +214,7 @@ export default function DiscoveryPage() {
 
   useEffect(() => {
     setSelectedIds(new Set());
+    setView("candidates");
     load();
   }, [load]);
 
@@ -272,7 +276,7 @@ export default function DiscoveryPage() {
   const allCandidatesSelected = !!candidates && candidates.length > 0 && candidates.every((c) => selectedIds.has(c.id));
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-10">
+    <div className="mx-auto max-w-5xl px-8 py-10">
       <PageHeader
         title={mode === "reseller" ? "Reseller discovery" : "Discovery"}
         description={
@@ -353,97 +357,135 @@ export default function DiscoveryPage() {
         </details>
       )}
 
-      {candidates && candidates.length > 0 && (
-        <div className="mt-6">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={allCandidatesSelected}
-                onCheckedChange={() =>
-                  setSelectedIds(allCandidatesSelected ? new Set() : new Set(candidates.map((c) => c.id)))
-                }
-                aria-label="Select all candidates"
-              />
-              <h2 className="text-sm font-medium text-ink">
-                {candidates.length} candidate{candidates.length === 1 ? "" : "s"} to review
-              </h2>
-            </div>
-            {selectedIds.size > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-soft">{selectedIds.size} selected</span>
-                <Button variant="outline" size="sm" disabled={bulkUpdating} onClick={() => handleBulkUpdate("saved")}>
-                  <Check className="size-3.5" />
-                  Save all
-                </Button>
-                <Button variant="outline" size="sm" disabled={bulkUpdating} onClick={() => handleBulkUpdate("dismissed")}>
-                  <X className="size-3.5" />
-                  Dismiss all
-                </Button>
-              </div>
+      {/* Tabs, not always-expanded sections — candidates/saved/dismissed are
+          review states a user works through one at a time, not something
+          meant to be scanned together, and rendering all three (dismissed
+          especially, which only grows) at once turned this page into an
+          endless scroll. */}
+      <div className="mt-6 flex items-center gap-1 border-b border-border">
+        {(
+          [
+            ["candidates", "Candidates", candidates?.length],
+            ["saved", mode === "reseller" ? "Saved resellers" : "Saved", savedSites?.length],
+            ["dismissed", "Dismissed", dismissedSites?.length],
+          ] as const
+        ).map(([key, label, count]) => (
+          <button
+            key={key}
+            onClick={() => setView(key)}
+            className={cn(
+              "border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+              view === key ? "border-accent text-ink" : "border-transparent text-slate-soft hover:text-ink"
             )}
-          </div>
-          <div className="mt-2 space-y-2">
-            {candidates.map((site) => (
-              <SiteCard
-                key={site.id}
-                site={site}
-                onUpdate={handleUpdate}
-                updating={updatingId === site.id || bulkUpdating}
-                selected={selectedIds.has(site.id)}
-                onToggleSelect={toggleSelect}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {runs && runs.length === 0 && (
-        <div className="mt-16 flex flex-col items-center text-center">
-          <div className="flex size-12 items-center justify-center rounded-full bg-black/[0.03]">
-            <Search className="size-5 text-slate-soft" />
-          </div>
-          <p className="mt-4 text-sm font-medium text-ink">
-            No {mode === "reseller" ? "reseller " : ""}discovery runs yet
-          </p>
-          <p className="mt-1 max-w-xs text-sm text-slate">
-            {mode === "reseller"
-              ? "Run reseller discovery to find businesses advertising your own products, for MAP compliance."
-              : "Run discovery to find competitors based on your business context and catalog."}
-          </p>
-        </div>
-      )}
-
-      <div className="mt-8">
-        <h2 className="text-sm font-medium text-ink">{mode === "reseller" ? "Saved resellers" : "Saved competitors"}</h2>
-        <p className="mt-1 text-xs text-slate-soft">
-          {mode === "reseller"
-            ? "Already know a reseller discovery hasn't found? Add them directly."
-            : "Already know a competitor discovery hasn't found? Add them directly."}
-        </p>
-        <div className="mt-2">
-          <AddCompetitorForm onAdded={load} relationshipType={mode} />
-        </div>
-        {savedSites && savedSites.length > 0 && (
-          <div className="mt-4 space-y-2">
-            {savedSites.map((site) => (
-              <SiteCard key={site.id} site={site} onUpdate={handleUpdate} updating={updatingId === site.id} />
-            ))}
-          </div>
-        )}
+          >
+            {label}
+            {count != null && count > 0 && <span className="ml-1 tabular-nums opacity-70">({count})</span>}
+          </button>
+        ))}
       </div>
 
-      {dismissedSites && dismissedSites.length > 0 && (
-        <details className={cn(cardClassName, "mt-8 p-0")}>
-          <summary className="cursor-pointer select-none px-4 py-2.5 text-xs font-medium text-slate">
-            Dismissed ({dismissedSites.length}) — a dismissed {mode === "reseller" ? "reseller" : "competitor"} is
-            never re-suggested by discovery; restore one here if you want it back
-          </summary>
-          <div className="space-y-2 border-t border-border p-4">
-            {dismissedSites.map((site) => (
-              <SiteCard key={site.id} site={site} onUpdate={handleUpdate} updating={updatingId === site.id} />
-            ))}
+      {view === "candidates" && (
+        <div className="mt-4">
+          {candidates && candidates.length > 0 ? (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={allCandidatesSelected}
+                    onCheckedChange={() =>
+                      setSelectedIds(allCandidatesSelected ? new Set() : new Set(candidates.map((c) => c.id)))
+                    }
+                    aria-label="Select all candidates"
+                  />
+                  <span className="text-xs text-slate-soft">Select all</span>
+                </div>
+                {selectedIds.size > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-soft">{selectedIds.size} selected</span>
+                    <Button variant="outline" size="sm" disabled={bulkUpdating} onClick={() => handleBulkUpdate("saved")}>
+                      <Check className="size-3.5" />
+                      Save all
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={bulkUpdating} onClick={() => handleBulkUpdate("dismissed")}>
+                      <X className="size-3.5" />
+                      Dismiss all
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {candidates.map((site) => (
+                  <SiteCard
+                    key={site.id}
+                    site={site}
+                    onUpdate={handleUpdate}
+                    updating={updatingId === site.id || bulkUpdating}
+                    selected={selectedIds.has(site.id)}
+                    onToggleSelect={toggleSelect}
+                  />
+                ))}
+              </div>
+            </>
+          ) : runs && runs.length === 0 ? (
+            <div className="flex flex-col items-center py-16 text-center">
+              <div className="flex size-12 items-center justify-center rounded-full bg-black/[0.03]">
+                <Search className="size-5 text-slate-soft" />
+              </div>
+              <p className="mt-4 text-sm font-medium text-ink">
+                No {mode === "reseller" ? "reseller " : ""}discovery runs yet
+              </p>
+              <p className="mt-1 max-w-xs text-sm text-slate">
+                {mode === "reseller"
+                  ? "Run reseller discovery to find businesses advertising your own products, for MAP compliance."
+                  : "Run discovery to find competitors based on your business context and catalog."}
+              </p>
+            </div>
+          ) : (
+            <p className="py-8 text-center text-sm text-slate">No candidates to review right now.</p>
+          )}
+        </div>
+      )}
+
+      {view === "saved" && (
+        <div className="mt-4">
+          <p className="text-xs text-slate-soft">
+            {mode === "reseller"
+              ? "Already know a reseller discovery hasn't found? Add them directly."
+              : "Already know a competitor discovery hasn't found? Add them directly."}
+          </p>
+          <div className="mt-2">
+            <AddCompetitorForm onAdded={load} relationshipType={mode} />
           </div>
-        </details>
+          {savedSites && savedSites.length > 0 ? (
+            <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {savedSites.map((site) => (
+                <SiteCard key={site.id} site={site} onUpdate={handleUpdate} updating={updatingId === site.id} />
+              ))}
+            </div>
+          ) : (
+            <p className="mt-6 text-center text-sm text-slate">Nothing saved yet.</p>
+          )}
+        </div>
+      )}
+
+      {view === "dismissed" && (
+        <div className="mt-4">
+          {dismissedSites && dismissedSites.length > 0 ? (
+            <>
+              <p className="text-xs text-slate-soft">
+                A dismissed {mode === "reseller" ? "reseller" : "competitor"} is never re-suggested by discovery —
+                restore one here if you want it back.
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {dismissedSites.map((site) => (
+                  <SiteCard key={site.id} site={site} onUpdate={handleUpdate} updating={updatingId === site.id} />
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="py-8 text-center text-sm text-slate">Nothing dismissed.</p>
+          )}
+        </div>
       )}
     </div>
   );

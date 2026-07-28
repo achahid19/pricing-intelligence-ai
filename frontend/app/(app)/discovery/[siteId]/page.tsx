@@ -284,7 +284,7 @@ export default function CompetitorProductsPage() {
 
   if (notFound) {
     return (
-      <div className="mx-auto max-w-4xl px-8 py-10">
+      <div className="mx-auto max-w-6xl px-8 py-10">
         <p className="text-sm text-danger">Couldn't find this competitor.</p>
         <Link href="/discovery" className="mt-2 inline-block text-sm text-accent hover:underline">
           Back to Discovery
@@ -295,14 +295,14 @@ export default function CompetitorProductsPage() {
 
   if (!site) {
     return (
-      <div className="mx-auto max-w-4xl px-8 py-10">
+      <div className="mx-auto max-w-6xl px-8 py-10">
         <p className="text-sm text-slate-soft">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-8 py-10">
+    <div className="mx-auto max-w-6xl px-8 py-10">
       <Link href="/discovery" className="inline-flex items-center gap-1.5 text-sm text-slate-soft hover:text-ink">
         <ArrowLeft className="size-4" />
         Back to Discovery
@@ -365,7 +365,7 @@ export default function CompetitorProductsPage() {
         {products && products.length === 0 && (
           <p className="mt-2 text-sm text-slate">No products discovered yet — click "Discover products" above.</p>
         )}
-        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {products?.map((p) => (
             <Card key={p.id}>
               <div className="flex flex-wrap items-center gap-2">
@@ -431,7 +431,7 @@ export default function CompetitorProductsPage() {
                   </div>
                 )}
               </div>
-              <div className="mt-2 space-y-2">
+              <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-2">
                 {candidateMatches.map((m) => (
                   <MatchCandidateCard
                     key={m.id}
@@ -454,25 +454,29 @@ export default function CompetitorProductsPage() {
         <div className="mt-8">
           <h2 className="text-sm font-medium text-ink">Manual matching</h2>
           <p className="mt-1 text-xs text-slate-soft">Drag a competitor product onto one of your own to pair them.</p>
-          <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
+          <div className="mt-2 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div>
               <p className="text-xs font-medium text-slate-soft">Your products</p>
-              {ownProducts?.map((p) => (
-                <OwnProductDropTarget
-                  key={p.id}
-                  product={p}
-                  confirmedMatches={confirmedByProduct[p.id] ?? []}
-                  competitorProductById={competitorProductById}
-                  onUnmatch={handleUnmatch}
-                  onDropCompetitorProduct={handleManualMatch}
-                />
-              ))}
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {ownProducts?.map((p) => (
+                  <OwnProductDropTarget
+                    key={p.id}
+                    product={p}
+                    confirmedMatches={confirmedByProduct[p.id] ?? []}
+                    competitorProductById={competitorProductById}
+                    onUnmatch={handleUnmatch}
+                    onDropCompetitorProduct={handleManualMatch}
+                  />
+                ))}
+              </div>
             </div>
-            <div className="space-y-2">
+            <div>
               <p className="text-xs font-medium text-slate-soft">{site.name || site.domain}&rsquo;s products</p>
-              {products.map((p) => (
-                <CompetitorProductChip key={p.id} product={p} />
-              ))}
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {products.map((p) => (
+                  <CompetitorProductChip key={p.id} product={p} />
+                ))}
+              </div>
             </div>
           </div>
         </div>
