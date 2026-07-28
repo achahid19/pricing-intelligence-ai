@@ -296,6 +296,57 @@ export interface AlertItem extends PriceComparisonRow {
   message: string;
 }
 
+// Same-currency-gated comparison metrics for one product (see
+// backend/app/reporting/metrics.py). Nulls/zeros when zero same-currency
+// competitor prices exist. "N of total" must always use
+// same_currency_competitors_count + 1 as the denominator, never
+// total_competitors_compared + 1 — the two differ whenever any match is
+// cross-currency.
+export interface ProductMetrics {
+  price_rank: number | null;
+  total_competitors_compared: number;
+  same_currency_competitors_count: number;
+  sellers_cheaper: number;
+  price_index: number | null;
+  cheapest_competitor_name: string | null;
+  cheapest_competitor_price: number | null;
+}
+
+export interface ProductComparisonGroup {
+  product_id: number;
+  product_name: string;
+  product_price: number;
+  product_currency: string;
+  product_min_price: number | null;
+  metrics: ProductMetrics;
+  matches: PriceComparisonRow[];
+}
+
+export interface UnmatchedCompetitorProduct {
+  competitor_product_id: number;
+  title: string;
+  price: number | null;
+  currency: string | null;
+  description: string | null;
+}
+
+export interface SiteCoverage {
+  competitor_site_id: number;
+  competitor_site_domain: string;
+  competitor_site_name: string | null;
+  relationship_type: DiscoveryMode;
+  total_products_discovered: number;
+  matched_products_count: number;
+  unmatched_sample: UnmatchedCompetitorProduct[];
+}
+
+export interface MarketCoverage {
+  own_catalog_size: number;
+  own_products_with_confirmed_match: number;
+  total_competitor_products_discovered: number;
+  sites: SiteCoverage[];
+}
+
 export interface SummaryStats {
   matches_tracked: number;
   alerts_count: number;
@@ -309,9 +360,12 @@ export interface SummaryStats {
 export interface ReportContent {
   schema_version: number;
   summary_stats: SummaryStats;
-  price_comparison: PriceComparisonRow[];
+  price_comparison: ProductComparisonGroup[];
+  market_coverage: MarketCoverage;
   alerts: AlertItem[];
   executive_summary: string | null;
+  market_position: string | null;
+  competitive_gaps: string | null;
   recommendations: { objective: string; text: string }[];
 }
 

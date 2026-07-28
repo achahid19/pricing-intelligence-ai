@@ -554,6 +554,8 @@ async def match_products(
 # Same "hard safety cap" reasoning as _MAX_MATCH_OWN_PRODUCTS — this many
 # rows is already far more than any real report needs to make its point.
 _MAX_NARRATIVE_ROWS = 200
+_MAX_NARRATIVE_PRODUCT_GROUPS = 200
+_MAX_NARRATIVE_COVERAGE_SITES = 30
 
 _OBJECTIVE_GUIDANCE = {
     "market_research": (
@@ -573,50 +575,82 @@ _OBJECTIVE_GUIDANCE = {
 _REPORT_NARRATIVE_PROMPT_TEMPLATE = (
     "You are writing a periodic competitor-pricing report for a business, based ENTIRELY on already-computed, "
     "already-correct data below — you are not researching anything new and must not invent, alter, or "
-    "second-guess any number in it. Your only job is to write prose: an executive summary and recommendations.\n\n"
+    "second-guess any number in it. Your only job is to write prose sections about data that has already been "
+    "decided for you.\n\n"
     "Business context:\n{business_context}\n\n"
     "{since_last_time}"
-    "Price comparison across every tracked (confirmed) competitor match ({match_count} matches):\n"
+    "Price comparison + ranking metrics across every tracked (confirmed) competitor match, grouped by your own "
+    "product ({group_count} of your products have at least one tracked match):\n"
     "{price_comparison_text}\n\n"
     "IMPORTANT — some rows are marked \"different currency, not directly comparable\" because this data has no "
     "currency conversion. For those rows, never describe one price as higher/lower/cheaper/pricier than the "
-    "other, and never characterize the size of a gap between them — the raw numbers alone tell you nothing "
-    "about which is actually more expensive. Only make a higher/lower/percentage claim about a pair when a "
-    "percentage difference is explicitly given in that row.\n\n"
+    "other, and never characterize the size of a gap between them. Only make a higher/lower/percentage claim "
+    "about a pair when a percentage difference is explicitly given.\n\n"
+    "IMPORTANT — reading price_index: a price_index of exactly 100 means priced at the tracked same-currency "
+    "average; price_index MINUS 100 is the exact percentage above/below that average (e.g. 112.34 means about "
+    "12% above average, 87 means about 13% below average). Never restate the index number itself as a "
+    "percentage, and never compute or restate a ranking/index number for a product where none is given below.\n\n"
+    "Market coverage — full discovered catalogs of every saved competitor, not just matched products "
+    "(this is what lets you talk about assortment/whitespace, not only price):\n"
+    "{market_coverage_text}\n\n"
+    "IMPORTANT — a site marked \"reseller\" sells THIS BUSINESS'S OWN products, it is not a rival with its own "
+    "product lineup. Its unmatched listings are a missed-match signal, not evidence of a competitor's "
+    "assortment — never use reseller-type sites when writing about market coverage or competitive gaps. Only "
+    "sites marked \"competitor\" represent a rival's own catalog.\n\n"
     "Alerts already flagged by the system (these are already decided facts — write about them, don't re-derive "
     "or second-guess them):\n{alerts_text}\n\n"
-    "Write:\n"
-    "1. An executive summary (2-4 sentences, plain and factual, no invented numbers beyond what's given above; "
-    "if a previous report's summary is given, note the most important change(s) since then).\n"
-    "2. Recommendations, ONLY for these selected business objectives: {objectives_list}. For each objective:\n"
+    "Write four things:\n"
+    "1. executive_summary (2-4 sentences, plain and factual; if a previous report's summary is given, note the "
+    "most important change(s) since then).\n"
+    "2. market_position (3-5 sentences synthesizing the ranking metrics above — cite specific products by name "
+    "with their real rank/index/sellers_cheaper numbers already given; if most or all products have no "
+    "same-currency ranking data, say so plainly rather than inventing a comparison).\n"
+    "3. competitive_gaps (3-5 sentences synthesizing the market-coverage data — catalog-size differences, and "
+    "notable unmatched products by name from competitor-type sites only; if there are no saved competitor-type "
+    "sites, say so plainly).\n"
+    "4. recommendations, ONLY for these selected business objectives: {objectives_list}. For each objective:\n"
     "{guidance_lines}\n"
     "If there is nothing meaningful to say for a given objective given the data above, omit it rather than "
     "padding.\n\n"
     "Respond with ONLY a JSON object, no markdown fences, no commentary before or after: "
-    '{{"executive_summary": "<2-4 sentences>", '
+    '{{"executive_summary": "<2-4 sentences>", "market_position": "<3-5 sentences>", '
+    '"competitive_gaps": "<3-5 sentences>", '
     '"recommendations": [{{"objective": "<one of: {objectives_list}>", '
     '"text": "<1-2 sentence, specific, actionable recommendation>"}}]}}'
 )
 
 
-def _format_comparison_rows_for_narrative(rows: list[dict]) -> str:
+def _format_comparison_groups_for_narrative(groups: list[dict]) -> str:
     lines = []
-    for r in rows[:_MAX_NARRATIVE_ROWS]:
-        own = f"{r['product_name']} (yours: {r['product_currency']} {r['product_price']:.2f}"
-        if r["product_min_price"] is not None:
-            own += f", MAP {r['product_min_price']:.2f}"
+    for g in groups[:_MAX_NARRATIVE_PRODUCT_GROUPS]:
+        own = f"{g['product_name']} (yours: {g['product_currency']} {g['product_price']:.2f}"
+        if g["product_min_price"] is not None:
+            own += f", MAP {g['product_min_price']:.2f}"
         own += ")"
-        competitor_label = r["competitor_site_name"] or r["competitor_site_domain"]
-        if r["competitor_product_price"] is not None:
-            comp = f'vs {competitor_label}\'s "{r["competitor_product_title"]}" at {r["competitor_product_currency"]} {r["competitor_product_price"]:.2f}'
-            if r["same_currency"] and r["price_delta_pct"] is not None:
-                comp += f" ({r['price_delta_pct']:+.1f}% vs yours)"
-            elif not r["same_currency"]:
-                comp += " — different currency, not directly comparable"
+        lines.append(f"- {own}")
+
+        m = g["metrics"]
+        if m["price_rank"] is not None:
+            lines.append(
+                f"  metrics: ranked #{m['price_rank']} of {m['same_currency_competitors_count'] + 1} tracked "
+                f"sellers (same currency), price_index {m['price_index']}, {m['sellers_cheaper']} cheaper, "
+                f"cheapest tracked competitor \"{m['cheapest_competitor_name']}\" at {m['cheapest_competitor_price']:.2f}"
+            )
         else:
-            comp = f'vs {competitor_label}\'s "{r["competitor_product_title"]}" (no price found)'
-        lines.append(f"- {own} {comp}")
-    return "\n".join(lines) if lines else "(none)"
+            lines.append("  metrics: no same-currency competitor price data available for ranking")
+
+        for r in g["matches"]:
+            competitor_label = r["competitor_site_name"] or r["competitor_site_domain"]
+            if r["competitor_product_price"] is not None:
+                comp = f'  vs {competitor_label}\'s "{r["competitor_product_title"]}" at {r["competitor_product_currency"]} {r["competitor_product_price"]:.2f}'
+                if r["same_currency"] and r["price_delta_pct"] is not None:
+                    comp += f" ({r['price_delta_pct']:+.1f}% vs yours)"
+                elif not r["same_currency"]:
+                    comp += " — different currency, not directly comparable"
+            else:
+                comp = f'  vs {competitor_label}\'s "{r["competitor_product_title"]}" (no price found)'
+            lines.append(comp)
+    return "\n".join(lines) if lines else "(no tracked matches yet)"
 
 
 def _format_alerts_for_narrative(alerts: list[dict]) -> str:
@@ -625,21 +659,50 @@ def _format_alerts_for_narrative(alerts: list[dict]) -> str:
     return "\n".join(f"- [{a['type']}] {a['message']}" for a in alerts[:_MAX_NARRATIVE_ROWS])
 
 
+def _format_market_coverage_for_narrative(coverage: dict) -> str:
+    lines = [
+        f"Your catalog: {coverage['own_catalog_size']} products "
+        f"({coverage['own_products_with_confirmed_match']} with a tracked competitor match).",
+        f"Total competitor products discovered across all saved sites: {coverage['total_competitor_products_discovered']}.",
+        "",
+    ]
+    sites = coverage.get("sites", [])
+    if not sites:
+        lines.append("(no saved competitor or reseller sites yet)")
+        return "\n".join(lines)
+
+    for site in sites[:_MAX_NARRATIVE_COVERAGE_SITES]:
+        label = site["competitor_site_name"] or site["competitor_site_domain"]
+        line = (
+            f"- {label} ({site['relationship_type']}): {site['total_products_discovered']} discovered, "
+            f"{site['matched_products_count']} matched."
+        )
+        unmatched = site.get("unmatched_sample") or []
+        if unmatched:
+            sample_titles = ", ".join(f'"{p["title"]}"' for p in unmatched[:5])
+            line += f" Not yet matched to anything in your catalog (sample): {sample_titles}."
+        if site["relationship_type"] == "reseller":
+            line += " (reseller — sells YOUR OWN products, not a rival's assortment.)"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 async def generate_report_narrative(
     db: AsyncSession,
     workspace_id: int,
     workspace,
     price_comparison: list[dict],
     alerts: list[dict],
+    market_coverage: dict,
     previous_executive_summary: Optional[str] = None,
 ) -> dict:
-    """Ask the workspace's active AI provider to write an executive summary
-    + recommendations OVER already-computed, already-correct data —
-    reporting/service.py has already decided every number and every alert;
-    this call only ever produces prose about them (see CLAUDE.md's "AI
-    narrates on top of deterministic data" rule). No web search — pure
-    reasoning over data already in hand, same non-search dispatch shape as
-    match_products(). Raises NoActiveProviderError if none configured."""
+    """Ask the workspace's active AI provider to write four prose sections
+    OVER already-computed, already-correct data — reporting/service.py has
+    already decided every number, metric, and alert; this call only ever
+    produces prose about them (see CLAUDE.md's "AI narrates on top of
+    deterministic data" rule). No web search — pure reasoning over data
+    already in hand, same non-search dispatch shape as match_products().
+    Raises NoActiveProviderError if none configured."""
     config = await _get_active_config(db, workspace_id)
     api_key = decrypt_key(config.encrypted_api_key)
     model = config.model_override or default_model_for(config.provider)
@@ -658,8 +721,9 @@ async def generate_report_narrative(
     prompt = _REPORT_NARRATIVE_PROMPT_TEMPLATE.format(
         business_context="\n".join(_render_business_context(workspace)) or "No business context provided yet.",
         since_last_time=since_last_time,
-        match_count=len(price_comparison),
-        price_comparison_text=_format_comparison_rows_for_narrative(price_comparison),
+        group_count=len(price_comparison),
+        price_comparison_text=_format_comparison_groups_for_narrative(price_comparison),
+        market_coverage_text=_format_market_coverage_for_narrative(market_coverage),
         alerts_text=_format_alerts_for_narrative(alerts),
         objectives_list=objectives_list,
         guidance_lines=guidance_lines,
@@ -681,7 +745,7 @@ async def generate_report_narrative(
         client = AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
             model=model,
-            max_tokens=2000,
+            max_tokens=3000,
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(block.text for block in resp.content if block.type == "text")

@@ -93,20 +93,30 @@ async def export_report_csv(
     writer.writerow(
         [
             "product_name", "product_price", "product_currency", "product_min_price",
+            "price_rank", "total_competitors_compared", "same_currency_competitors_count",
+            "sellers_cheaper", "price_index", "cheapest_competitor_name", "cheapest_competitor_price",
             "competitor_site_domain", "competitor_product_title",
             "competitor_product_price", "competitor_product_currency",
             "price_delta_pct", "alert",
         ]
     )
-    for row in report.content.get("price_comparison", []):
-        writer.writerow(
-            [
-                row["product_name"], row["product_price"], row["product_currency"], row["product_min_price"],
-                row["competitor_site_domain"], row["competitor_product_title"],
-                row["competitor_product_price"], row["competitor_product_currency"],
-                row["price_delta_pct"], alert_by_match_id.get(row["match_id"], ""),
-            ]
-        )
+    # One row per confirmed match (same grain as before) — a product's
+    # metrics are denormalized onto every one of its match rows rather than
+    # mixed in as a separate summary row shape, so the CSV stays a single
+    # flat grain a spreadsheet can pivot on directly.
+    for group in report.content.get("price_comparison", []):
+        m = group["metrics"]
+        for row in group["matches"]:
+            writer.writerow(
+                [
+                    group["product_name"], group["product_price"], group["product_currency"], group["product_min_price"],
+                    m["price_rank"], m["total_competitors_compared"], m["same_currency_competitors_count"],
+                    m["sellers_cheaper"], m["price_index"], m["cheapest_competitor_name"], m["cheapest_competitor_price"],
+                    row["competitor_site_domain"], row["competitor_product_title"],
+                    row["competitor_product_price"], row["competitor_product_currency"],
+                    row["price_delta_pct"], alert_by_match_id.get(row["match_id"], ""),
+                ]
+            )
 
     return Response(
         content=buffer.getvalue(),

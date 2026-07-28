@@ -13,7 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.discovery.models import CompetitorProductSnapshot
-from app.discovery.service import fetch_tracked_matches
+from app.discovery.service import fetch_market_coverage, fetch_tracked_matches
+from app.reporting.metrics import group_comparison_rows
 from app.reporting.models import CompetitorReport
 from app.services import ai_client
 from app.services.model_catalog import default_model_for
@@ -27,10 +28,13 @@ PRICE_ANOMALY_THRESHOLD_PCT = 15.0
 
 
 class NoTrackedMatchesError(Exception):
-    """Raised when the workspace has no confirmed match with a trackable
-    (priced) competitor product — a report over zero comparable prices
-    would be a wasted AI call, same reasoning as auto_match_site_products's
-    "your catalog is empty" guard."""
+    """Raised only when there is truly nothing to report on — no confirmed
+    trackable match AND no discovered competitor product anywhere in the
+    workspace. Deliberately broad (not "zero matches" alone): a workspace
+    with real saved competitors and rich discovered catalogs but few/no
+    confirmed matches yet still has a genuine market-coverage story to
+    tell, and blocking that entirely was the exact "isn't this limited"
+    problem this data source was added to fix."""
 
 
 async def _get_active_config(db: AsyncSession, workspace_id: int) -> AiProviderConfig:
@@ -209,22 +213,27 @@ def _build_summary_stats(rows: list[dict], alerts: list[dict]) -> dict:
 async def generate_report(db: AsyncSession, workspace: Workspace, trigger_source: str = "manual") -> CompetitorReport:
     """The one function both the manual endpoint and the scheduler call."""
     match_rows = await fetch_tracked_matches(db, workspace.id, status_filter="confirmed")
-    if not any(cproduct.is_trackable for _match, _product, cproduct, _site in match_rows):
+    market_coverage = await fetch_market_coverage(db, workspace.id)
+
+    has_trackable_match = any(cproduct.is_trackable for _match, _product, cproduct, _site in match_rows)
+    has_discovered_competitor_data = market_coverage["total_competitor_products_discovered"] > 0
+    if not has_trackable_match and not has_discovered_competitor_data:
         raise NoTrackedMatchesError(
-            "No confirmed matches with a trackable competitor price yet — confirm at least one priced match first."
+            "Nothing to report on yet — save a competitor and discover their products, or confirm a priced match, first."
         )
 
     config = await _get_active_config(db, workspace.id)
     previous_report = await get_previous_report(db, workspace.id)
 
-    price_comparison = []
+    flat_rows = []
     for match, product, cproduct, site in match_rows:
         competitor_price = float(cproduct.price) if cproduct.price is not None else None
         trend = await _compute_trend(db, cproduct.id, previous_report, competitor_price)
-        price_comparison.append(_compute_comparison_row(match, product, cproduct, site, trend))
+        flat_rows.append(_compute_comparison_row(match, product, cproduct, site, trend))
 
-    alerts = _build_alerts(price_comparison)
-    summary_stats = _build_summary_stats(price_comparison, alerts)
+    alerts = _build_alerts(flat_rows)
+    summary_stats = _build_summary_stats(flat_rows, alerts)
+    price_comparison = group_comparison_rows(flat_rows)
 
     narrative_error = None
     try:
@@ -234,23 +243,31 @@ async def generate_report(db: AsyncSession, workspace: Workspace, trigger_source
             workspace,
             price_comparison,
             alerts,
+            market_coverage,
             previous_executive_summary=(previous_report.content.get("executive_summary") if previous_report else None),
         )
         status_ = "completed"
         executive_summary = narrative["executive_summary"]
+        market_position = narrative["market_position"]
+        competitive_gaps = narrative["competitive_gaps"]
         recommendations = narrative["recommendations"]
     except Exception as exc:
         status_ = "failed"
         executive_summary = None
+        market_position = None
+        competitive_gaps = None
         recommendations = []
         narrative_error = str(exc)[:2000]
 
     content = {
-        "schema_version": 1,
+        "schema_version": 2,
         "summary_stats": summary_stats,
         "price_comparison": price_comparison,
+        "market_coverage": market_coverage,
         "alerts": alerts,
         "executive_summary": executive_summary,
+        "market_position": market_position,
+        "competitive_gaps": competitive_gaps,
         "recommendations": recommendations,
     }
 
