@@ -210,6 +210,7 @@ export interface CompetitorProduct {
   description: string | null;
   stock_status: string | null;
   additional_info: string | null;
+  is_trackable: boolean;
   discovered_at: string;
   updated_at: string;
 }
@@ -226,6 +227,34 @@ export interface ProductMatch {
   rationale: string | null;
   status: ProductMatchStatus;
   created_at: string;
+}
+
+// Flat, denormalized view of one confirmed (or other-status) ProductMatch
+// for the workspace-wide Tracked page — joins in enough from
+// Product/CompetitorProduct/CompetitorSite server-side that the frontend
+// needs no further per-id lookups.
+export interface TrackedMatch {
+  id: number;
+  status: ProductMatchStatus;
+  match_method: "manual" | "ai_auto";
+  confidence: number | null;
+  rationale: string | null;
+  created_at: string;
+  product_id: number;
+  product_name: string;
+  product_price: string;
+  product_currency: string;
+  product_min_price: string | null;
+  competitor_product_id: number;
+  competitor_product_title: string;
+  competitor_product_price: string | null;
+  competitor_product_currency: string | null;
+  competitor_product_is_trackable: boolean;
+  competitor_product_updated_at: string;
+  competitor_site_id: number;
+  competitor_site_domain: string;
+  competitor_site_name: string | null;
+  competitor_site_relationship_type: DiscoveryMode;
 }
 
 export const api = {
@@ -338,5 +367,7 @@ export const api = {
       }),
     updateMatch: (matchId: number, status: "confirmed" | "dismissed") =>
       request<ProductMatch>(`/discovery/matches/${matchId}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    listTrackedMatches: (status: ProductMatchStatus = "confirmed") =>
+      request<TrackedMatch[]>(`/discovery/matches?status_filter=${status}`),
   },
 };

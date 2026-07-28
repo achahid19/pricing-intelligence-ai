@@ -9,7 +9,13 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.dependencies import get_current_workspace
 from app.catalog.models import Product
-from app.discovery.models import CompetitorProduct, CompetitorSite, DiscoveryRun, ProductMatch
+from app.discovery.models import (
+    CompetitorProduct,
+    CompetitorProductSnapshot,
+    CompetitorSite,
+    DiscoveryRun,
+    ProductMatch,
+)
 from app.discovery.schemas import (
     CompetitorProductOut,
     CompetitorSiteCreate,
@@ -21,6 +27,7 @@ from app.discovery.schemas import (
     ProductMatchCreate,
     ProductMatchOut,
     ProductMatchUpdate,
+    TrackedMatchOut,
 )
 from app.db.database import get_db
 from app.services import ai_client
@@ -391,14 +398,19 @@ async def discover_products_for_site(
         description = _strip_citations(candidate.get("description"))
         additional_info = _strip_citations(candidate.get("additional_info"))
 
+        stock_status = candidate.get("stock_status")
+        is_trackable = price is not None
+
         key = (url, title)
         existing = existing_by_key.get(key)
         if existing is not None:
             existing.price = price
             existing.currency = candidate.get("currency")
             existing.description = description
-            existing.stock_status = candidate.get("stock_status")
+            existing.stock_status = stock_status
             existing.additional_info = additional_info
+            existing.is_trackable = is_trackable
+            product = existing
         else:
             product = CompetitorProduct(
                 workspace_id=workspace.id,
@@ -408,11 +420,23 @@ async def discover_products_for_site(
                 currency=candidate.get("currency"),
                 url=url,
                 description=description,
-                stock_status=candidate.get("stock_status"),
+                stock_status=stock_status,
                 additional_info=additional_info,
+                is_trackable=is_trackable,
             )
             db.add(product)
             existing_by_key[key] = product
+
+        # A price/stock reading for every product touched this run — the
+        # CompetitorProduct row above only ever holds the latest state, so
+        # without this the previous value would be silently overwritten and
+        # lost the moment this run commits. Appending via the relationship
+        # (rather than setting competitor_product_id directly) lets
+        # SQLAlchemy resolve the FK at flush time even for a brand-new,
+        # not-yet-committed product.
+        product.snapshots.append(
+            CompetitorProductSnapshot(workspace_id=workspace.id, price=price, stock_status=stock_status)
+        )
 
     site.products_discovered_at = datetime.now(timezone.utc)
     await db.commit()
@@ -531,6 +555,53 @@ async def auto_match_site_products(
         .where(CompetitorProduct.competitor_site_id == site.id)
     )
     return refreshed.scalars().all()
+
+
+@router.get("/matches", response_model=list[TrackedMatchOut])
+async def list_tracked_matches(
+    status_filter: str = "confirmed",
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Workspace-wide view of matches across every competitor — unlike
+    /sites/{site_id}/matches (scoped to one competitor, used for review),
+    this is what a "your catalog vs. every tracked competitor" page reads
+    from, so it joins in enough from Product/CompetitorProduct/
+    CompetitorSite that the frontend needs no further per-id lookups."""
+    result = await db.execute(
+        select(ProductMatch, Product, CompetitorProduct, CompetitorSite)
+        .join(Product, ProductMatch.product_id == Product.id)
+        .join(CompetitorProduct, ProductMatch.competitor_product_id == CompetitorProduct.id)
+        .join(CompetitorSite, CompetitorProduct.competitor_site_id == CompetitorSite.id)
+        .where(ProductMatch.workspace_id == workspace.id, ProductMatch.status == status_filter)
+        .order_by(Product.name)
+    )
+    return [
+        TrackedMatchOut(
+            id=match.id,
+            status=match.status,
+            match_method=match.match_method,
+            confidence=match.confidence,
+            rationale=match.rationale,
+            created_at=match.created_at,
+            product_id=product.id,
+            product_name=product.name,
+            product_price=product.price,
+            product_currency=product.currency,
+            product_min_price=product.min_price,
+            competitor_product_id=cproduct.id,
+            competitor_product_title=cproduct.title,
+            competitor_product_price=cproduct.price,
+            competitor_product_currency=cproduct.currency,
+            competitor_product_is_trackable=cproduct.is_trackable,
+            competitor_product_updated_at=cproduct.updated_at,
+            competitor_site_id=site.id,
+            competitor_site_domain=site.domain,
+            competitor_site_name=site.name,
+            competitor_site_relationship_type=site.relationship_type,
+        )
+        for match, product, cproduct, site in result.all()
+    ]
 
 
 @router.get("/sites/{site_id}/matches", response_model=list[ProductMatchOut])

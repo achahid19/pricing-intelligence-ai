@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -132,6 +132,9 @@ class CompetitorProduct(Base):
     # not a fixed set of structured attribute columns, since what's worth
     # capturing varies enormously by product type.
     additional_info: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Derived (price is not None), not user-editable — some listings are
+    # "contact for quote"/spec-only with no price to track at all.
+    is_trackable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     discovered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -146,6 +149,39 @@ class CompetitorProduct(Base):
     matches: Mapped[list["ProductMatch"]] = relationship(
         back_populates="competitor_product", cascade="all, delete-orphan"
     )
+    snapshots: Mapped[list["CompetitorProductSnapshot"]] = relationship(
+        back_populates="competitor_product", cascade="all, delete-orphan"
+    )
+
+
+class CompetitorProductSnapshot(Base):
+    """
+    A point-in-time price/stock reading for a CompetitorProduct, written
+    every time discovery re-runs for its site — CompetitorProduct itself is
+    mutated in place (it's the "latest known state" used for matching/
+    display), so without this table the previous price is silently
+    overwritten and lost the moment a fresher run completes. This is what
+    lets a future report say "price dropped from X to Y" instead of only
+    ever showing today's snapshot. workspace_id is denormalized for the
+    same reason as every other table in this domain.
+    """
+    __tablename__ = "competitor_product_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    competitor_product_id: Mapped[int] = mapped_column(
+        ForeignKey("competitor_products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    stock_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+    competitor_product: Mapped["CompetitorProduct"] = relationship(back_populates="snapshots")
 
 
 class ProductMatch(Base):

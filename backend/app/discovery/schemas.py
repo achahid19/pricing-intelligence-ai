@@ -78,6 +78,7 @@ class CompetitorProductOut(BaseModel):
     description: Optional[str]
     stock_status: Optional[str]
     additional_info: Optional[str]
+    is_trackable: bool
     discovered_at: datetime
     updated_at: datetime
 
@@ -114,3 +115,37 @@ class ProductMatchCreate(BaseModel):
 
 class ProductMatchUpdate(BaseModel):
     status: Literal["confirmed", "dismissed"]
+
+
+class TrackedMatchOut(BaseModel):
+    """Flat, denormalized view of one ProductMatch for the workspace-wide
+    Tracked page — joins in just enough from Product/CompetitorProduct/
+    CompetitorSite that the frontend can render a full comparison row
+    without a second round of per-id lookups."""
+
+    id: int
+    status: str
+    match_method: str
+    confidence: Optional[int]
+    rationale: Optional[str]
+    created_at: datetime
+
+    product_id: int
+    product_name: str
+    product_price: Decimal
+    product_currency: str
+    product_min_price: Optional[Decimal]
+
+    competitor_product_id: int
+    competitor_product_title: str
+    competitor_product_price: Optional[Decimal]
+    competitor_product_currency: Optional[str]
+    competitor_product_is_trackable: bool
+    competitor_product_updated_at: datetime
+
+    competitor_site_id: int
+    competitor_site_domain: str
+    competitor_site_name: Optional[str]
+    competitor_site_relationship_type: str
+
+    model_config = {"from_attributes": True}

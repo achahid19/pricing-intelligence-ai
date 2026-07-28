@@ -150,10 +150,12 @@ function CompetitorProductChip({ product }: { product: CompetitorProduct }) {
       className="cursor-grab rounded-md border border-border bg-paper-raised p-3 active:cursor-grabbing"
     >
       <p className="truncate text-sm font-medium text-ink">{product.title}</p>
-      {product.price != null && (
+      {product.is_trackable ? (
         <p className="text-xs tabular-nums text-slate-soft">
           {product.currency} {product.price}
         </p>
+      ) : (
+        <p className="text-xs text-slate-soft">No price found</p>
       )}
     </div>
   );
@@ -408,6 +410,7 @@ export default function CompetitorProductsPage() {
                     <ExternalLink className="size-3" />
                   </a>
                   {p.stock_status && <Badge tone="neutral">{p.stock_status}</Badge>}
+                  {!p.is_trackable && <Badge tone="neutral">No price found</Badge>}
                 </div>
                 {p.price != null && (
                   <p className="mt-0.5 text-xs tabular-nums text-slate-soft">

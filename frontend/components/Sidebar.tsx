@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutGrid, LogOut, Menu, Package, Search, Settings, X } from "lucide-react";
+import { LayoutGrid, LogOut, Menu, Package, Search, Settings, TrendingUp, X } from "lucide-react";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { clearToken } from "@/lib/api";
@@ -12,6 +12,7 @@ const NAV = [
   { href: "/", label: "Home", icon: LayoutGrid },
   { href: "/catalog", label: "Catalog", icon: Package },
   { href: "/discovery", label: "Discovery", icon: Search },
+  { href: "/tracked", label: "Tracked", icon: TrendingUp },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
