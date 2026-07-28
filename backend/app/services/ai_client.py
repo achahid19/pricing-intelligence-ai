@@ -240,19 +240,20 @@ def build_discovery_context(workspace, products: list) -> str:
     return "\n".join(lines) if lines else "No business context provided yet."
 
 
-async def discover_competitor_sites(
-    db: AsyncSession, workspace_id: int, business_context: str, max_candidates: int = 10
+async def _run_web_search_prompt(
+    db: AsyncSession, workspace_id: int, prompt: str, max_results: int
 ) -> tuple[dict, Optional[int]]:
-    """Ask the workspace's active AI provider to research and propose
-    competitor businesses via its native web search tool. Returns
-    (parsed_json, search_count) — search_count is a best-effort usage
-    figure for the lightweight cost-transparency note, None where the
-    provider's response doesn't expose one. Raises NoActiveProviderError
-    if none configured."""
+    """Shared per-provider native-web-search dispatch — the same call
+    shape used by discover_competitor_sites(), discover_reseller_sites(),
+    and discover_competitor_products(); only the prompt text differs
+    between them, so the provider plumbing lives here once instead of
+    being duplicated a third time. Returns (parsed_json, search_count) —
+    search_count is a best-effort usage figure for the lightweight
+    cost-transparency note, None where the provider's response doesn't
+    expose one. Raises NoActiveProviderError if none configured."""
     config = await _get_active_config(db, workspace_id)
     api_key = decrypt_key(config.encrypted_api_key)
     model = config.model_override or default_model_for(config.provider)
-    prompt = _DISCOVER_PROMPT_TEMPLATE.format(context=business_context, max_candidates=max_candidates)
 
     if config.provider == "openai":
         from openai import AsyncOpenAI
@@ -274,7 +275,7 @@ async def discover_competitor_sites(
             model=model,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
-            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": max_candidates}],
+            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": max_results}],
         )
         text = "".join(block.text for block in resp.content if block.type == "text")
         search_count = None
@@ -307,6 +308,62 @@ async def discover_competitor_sites(
         return _extract_json_object(resp.text), search_count
 
     raise ValueError(f"Unknown provider: {config.provider}")
+
+
+async def discover_competitor_sites(
+    db: AsyncSession, workspace_id: int, business_context: str, max_candidates: int = 10
+) -> tuple[dict, Optional[int]]:
+    """Ask the workspace's active AI provider to research and propose
+    competitor businesses via its native web search tool. See
+    _run_web_search_prompt for the (parsed_json, search_count) return
+    shape and NoActiveProviderError behavior."""
+    prompt = _DISCOVER_PROMPT_TEMPLATE.format(context=business_context, max_candidates=max_candidates)
+    return await _run_web_search_prompt(db, workspace_id, prompt, max_candidates)
+
+
+_DISCOVER_RESELLERS_PROMPT_TEMPLATE = (
+    "You are researching real businesses that resell, distribute, or advertise this "
+    "business's own products — not rival companies with their own competing brand — using "
+    "web search, not guessing from memory or training data. This is for MAP (minimum "
+    "advertised price) compliance monitoring: finding resellers, retailers, distributors, "
+    "marketplaces, or affiliate sites that list or sell this business's actual products, so "
+    "their advertised prices can later be checked against this business's own MAP policy.\n\n"
+    "Business context:\n{context}\n\n"
+    "Search the web and identify up to {max_candidates} real businesses that currently "
+    "advertise or sell THIS business's own products — e.g. an authorized reseller, "
+    "distributor, marketplace listing, or third-party retailer actually carrying this "
+    "business's product line. Marketplaces and large retailers are exactly what you're "
+    "looking for here, unlike a search for rival competitors. Do NOT include other companies "
+    "selling their OWN competing brand or products instead of this business's — that is a "
+    "different kind of research, not what is needed here. Do not include this business's own "
+    "website. For each one, base your confidence on concrete evidence you actually found (for "
+    "example, this business's specific product listed on their site), not assumptions — if "
+    "you cannot find real evidence they carry this business's own products, leave them out "
+    "rather than guessing.\n\n"
+    "Respond with ONLY a JSON object, no markdown fences, no commentary before or after: "
+    '{{"candidates": [{{"domain": "<bare domain, e.g. example.com, no scheme or path>", '
+    '"name": "<company name>", '
+    '"confidence": <integer 0-100, how confident you are this reseller genuinely carries the '
+    'business\'s own products, based on what you found>, '
+    '"rationale": "<1-2 sentences citing the specific evidence you found that they resell or '
+    'advertise the business\'s own products>", '
+    '"estimated_product_count": <integer estimate if you can tell from what you found, else null>}}]}}'
+)
+
+
+async def discover_reseller_sites(
+    db: AsyncSession, workspace_id: int, business_context: str, max_candidates: int = 10
+) -> tuple[dict, Optional[int]]:
+    """The inverse of discover_competitor_sites(): finds businesses that
+    advertise/sell THIS workspace's own products (resellers, retailers,
+    distributors, marketplaces) rather than rival businesses with their
+    own competing brand. Needed for MAP-compliance monitoring — you can't
+    check whether a reseller is advertising below your MAP floor until
+    you've found the resellers, which is a fundamentally different search
+    than finding your competitors. See _run_web_search_prompt for the
+    return shape and NoActiveProviderError behavior."""
+    prompt = _DISCOVER_RESELLERS_PROMPT_TEMPLATE.format(context=business_context, max_candidates=max_candidates)
+    return await _run_web_search_prompt(db, workspace_id, prompt, max_candidates)
 
 
 _DISCOVER_PRODUCTS_PROMPT_TEMPLATE = (
@@ -348,65 +405,12 @@ async def discover_competitor_products(
     products found there. Same dispatch shape as discover_competitor_sites
     — reused deliberately rather than adding a per-provider fetch/url-
     context tool: none of the three providers render JavaScript anyway, so
-    a dedicated fetch tool wouldn't close that gap, and this keeps the
-    integration to the one call shape already proven. Returns
-    (parsed_json, search_count). Raises NoActiveProviderError if none
-    configured."""
-    config = await _get_active_config(db, workspace_id)
-    api_key = decrypt_key(config.encrypted_api_key)
-    model = config.model_override or default_model_for(config.provider)
+    a dedicated fetch tool wouldn't close that gap. See
+    _run_web_search_prompt for the return shape and NoActiveProviderError
+    behavior."""
     label = f"{name} ({domain})" if name else domain
     prompt = _DISCOVER_PRODUCTS_PROMPT_TEMPLATE.format(label=label, domain=domain, max_products=max_products)
-
-    if config.provider == "openai":
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=api_key)
-        resp = await client.responses.create(
-            model=model,
-            tools=[{"type": "web_search"}],
-            input=prompt,
-        )
-        search_count = sum(1 for item in resp.output if getattr(item, "type", None) == "web_search_call")
-        return _extract_json_object(resp.output_text), search_count or None
-
-    if config.provider == "anthropic":
-        from anthropic import AsyncAnthropic
-
-        client = AsyncAnthropic(api_key=api_key)
-        resp = await client.messages.create(
-            model=model,
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": max_products}],
-        )
-        text = "".join(block.text for block in resp.content if block.type == "text")
-        search_count = None
-        server_tool_use = getattr(resp.usage, "server_tool_use", None)
-        if server_tool_use is not None:
-            search_count = getattr(server_tool_use, "web_search_requests", None)
-        return _extract_json_object(text), search_count
-
-    if config.provider == "google":
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=3)),
-        )
-        grounding_tool = types.Tool(google_search=types.GoogleSearch())
-        gen_config = types.GenerateContentConfig(tools=[grounding_tool])
-        resp = await client.aio.models.generate_content(model=model, contents=[prompt], config=gen_config)
-        search_count = None
-        grounding_metadata = getattr(resp.candidates[0], "grounding_metadata", None) if resp.candidates else None
-        if grounding_metadata is not None:
-            queries = getattr(grounding_metadata, "web_search_queries", None)
-            if queries is not None:
-                search_count = len(queries)
-        return _extract_json_object(resp.text), search_count
-
-    raise ValueError(f"Unknown provider: {config.provider}")
+    return await _run_web_search_prompt(db, workspace_id, prompt, max_products)
 
 
 _MATCH_PROMPT_TEMPLATE = (

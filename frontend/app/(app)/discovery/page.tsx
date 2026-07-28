@@ -12,7 +12,7 @@ import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
-import { api, ApiError, type CompetitorSite, type DiscoveryRun } from "@/lib/api";
+import { api, ApiError, type CompetitorSite, type DiscoveryMode, type DiscoveryRun } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const SITE_CONFIDENCE_TOOLTIP =
@@ -117,7 +117,7 @@ function SiteCard({
   );
 }
 
-function AddCompetitorForm({ onAdded }: { onAdded: () => void }) {
+function AddCompetitorForm({ onAdded, relationshipType }: { onAdded: () => void; relationshipType: DiscoveryMode }) {
   const [domain, setDomain] = useState("");
   const [name, setName] = useState("");
   const [adding, setAdding] = useState(false);
@@ -132,7 +132,7 @@ function AddCompetitorForm({ onAdded }: { onAdded: () => void }) {
     setError(null);
     setAdding(true);
     try {
-      await api.discovery.createSite(domain.trim(), name.trim() || undefined);
+      await api.discovery.createSite(domain.trim(), name.trim() || undefined, relationshipType);
       setDomain("");
       setName("");
       onAdded();
@@ -151,7 +151,7 @@ function AddCompetitorForm({ onAdded }: { onAdded: () => void }) {
           id="add-domain"
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
-          placeholder="competitor.com"
+          placeholder={relationshipType === "reseller" ? "reseller.com" : "competitor.com"}
           className="h-9 w-40"
         />
       </div>
@@ -167,7 +167,7 @@ function AddCompetitorForm({ onAdded }: { onAdded: () => void }) {
       </div>
       <Button type="submit" variant="outline" size="sm" disabled={adding}>
         <Plus className="size-3.5" />
-        {adding ? "Adding…" : "Add competitor"}
+        {adding ? "Adding…" : relationshipType === "reseller" ? "Add reseller" : "Add competitor"}
       </Button>
       {error && <p className="w-full text-xs text-danger">{error}</p>}
     </form>
@@ -175,6 +175,8 @@ function AddCompetitorForm({ onAdded }: { onAdded: () => void }) {
 }
 
 export default function DiscoveryPage() {
+  const [mode, setMode] = useState<DiscoveryMode>("competitor");
+  const [showResellerMode, setShowResellerMode] = useState(false);
   const [runs, setRuns] = useState<DiscoveryRun[] | null>(null);
   const [candidates, setCandidates] = useState<CompetitorSite[] | null>(null);
   const [savedSites, setSavedSites] = useState<CompetitorSite[] | null>(null);
@@ -187,16 +189,28 @@ export default function DiscoveryPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
 
-  const load = useCallback(() => {
-    api.discovery.listRuns().then(setRuns).catch(() => setRuns([]));
-    // Pending candidates from every past run, not just the latest — an
-    // older run's un-actioned suggestions shouldn't just disappear.
-    api.discovery.listSites("candidate").then(setCandidates).catch(() => setCandidates([]));
-    api.discovery.listSites("saved").then(setSavedSites).catch(() => setSavedSites([]));
-    api.discovery.listSites("dismissed").then(setDismissedSites).catch(() => setDismissedSites([]));
+  // The reseller-tracking mode only makes sense for workspaces that
+  // actually monitor MAP compliance — hidden entirely otherwise, so this
+  // stays a single simple "Discovery" page for everyone else, per the
+  // objectives already captured at onboarding/Settings.
+  useEffect(() => {
+    api.workspace
+      .me()
+      .then((ws) => setShowResellerMode((ws.objectives_selected ?? []).includes("map_compliance")))
+      .catch(() => setShowResellerMode(false));
   }, []);
 
+  const load = useCallback(() => {
+    api.discovery.listRuns(mode).then(setRuns).catch(() => setRuns([]));
+    // Pending candidates from every past run, not just the latest — an
+    // older run's un-actioned suggestions shouldn't just disappear.
+    api.discovery.listSites("candidate", mode).then(setCandidates).catch(() => setCandidates([]));
+    api.discovery.listSites("saved", mode).then(setSavedSites).catch(() => setSavedSites([]));
+    api.discovery.listSites("dismissed", mode).then(setDismissedSites).catch(() => setDismissedSites([]));
+  }, [mode]);
+
   useEffect(() => {
+    setSelectedIds(new Set());
     load();
   }, [load]);
 
@@ -205,10 +219,11 @@ export default function DiscoveryPage() {
     setLastRunNote(null);
     setRunning(true);
     try {
-      const run = await api.discovery.createRun(maxCandidates);
+      const run = await api.discovery.createRun(maxCandidates, mode);
       if (run.skipped_known_count) {
+        const noun = mode === "reseller" ? "reseller" : "competitor";
         setLastRunNote(
-          `Skipped ${run.skipped_known_count} competitor${run.skipped_known_count === 1 ? "" : "s"} you'd already seen before.`
+          `Skipped ${run.skipped_known_count} ${noun}${run.skipped_known_count === 1 ? "" : "s"} you'd already seen before.`
         );
       }
       load();
@@ -259,16 +274,20 @@ export default function DiscoveryPage() {
   return (
     <div className="mx-auto max-w-3xl px-8 py-10">
       <PageHeader
-        title="Discovery"
-        description="Find real competitors using web search, tailored to your business context and catalog."
+        title={mode === "reseller" ? "Reseller discovery" : "Discovery"}
+        description={
+          mode === "reseller"
+            ? "Find businesses that advertise or sell your own products, so you can check their prices against your MAP policy."
+            : "Find real competitors using web search, tailored to your business context and catalog."
+        }
         actions={
           <>
             <div className="space-y-1">
               <div className="flex items-center gap-1.5">
                 <label htmlFor="max-candidates" className="text-xs font-medium text-slate">
-                  Max competitors
+                  {mode === "reseller" ? "Max resellers" : "Max competitors"}
                 </label>
-                <InfoTooltip text="More competitors found means more AI reasoning and web-search cost on this run — your provider bills for both, so higher isn't free." />
+                <InfoTooltip text="More results found means more AI reasoning and web-search cost on this run — your provider bills for both, so higher isn't free." />
               </div>
               <Input
                 id="max-candidates"
@@ -285,11 +304,34 @@ export default function DiscoveryPage() {
             </div>
             <Button onClick={handleRun} disabled={running}>
               <Sparkles className="size-4" />
-              {running ? "Researching…" : "Run discovery"}
+              {running ? "Researching…" : mode === "reseller" ? "Run reseller discovery" : "Run discovery"}
             </Button>
           </>
         }
       />
+
+      {showResellerMode && (
+        <div className="mt-4 inline-flex rounded-md border border-border bg-paper-raised p-1">
+          <button
+            onClick={() => setMode("competitor")}
+            className={cn(
+              "rounded px-3 py-1.5 text-sm font-medium transition-colors",
+              mode === "competitor" ? "bg-accent text-white" : "text-slate hover:text-ink"
+            )}
+          >
+            Competitors
+          </button>
+          <button
+            onClick={() => setMode("reseller")}
+            className={cn(
+              "rounded px-3 py-1.5 text-sm font-medium transition-colors",
+              mode === "reseller" ? "bg-accent text-white" : "text-slate hover:text-ink"
+            )}
+          >
+            Resellers (MAP)
+          </button>
+        </div>
+      )}
 
       {running && <p className="mt-4 text-sm text-slate-soft">This can take up to 30 seconds — your AI provider is actively searching the web.</p>}
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
@@ -360,18 +402,26 @@ export default function DiscoveryPage() {
           <div className="flex size-12 items-center justify-center rounded-full bg-black/[0.03]">
             <Search className="size-5 text-slate-soft" />
           </div>
-          <p className="mt-4 text-sm font-medium text-ink">No discovery runs yet</p>
+          <p className="mt-4 text-sm font-medium text-ink">
+            No {mode === "reseller" ? "reseller " : ""}discovery runs yet
+          </p>
           <p className="mt-1 max-w-xs text-sm text-slate">
-            Run discovery to find competitors based on your business context and catalog.
+            {mode === "reseller"
+              ? "Run reseller discovery to find businesses advertising your own products, for MAP compliance."
+              : "Run discovery to find competitors based on your business context and catalog."}
           </p>
         </div>
       )}
 
       <div className="mt-8">
-        <h2 className="text-sm font-medium text-ink">Saved competitors</h2>
-        <p className="mt-1 text-xs text-slate-soft">Already know a competitor discovery hasn't found? Add them directly.</p>
+        <h2 className="text-sm font-medium text-ink">{mode === "reseller" ? "Saved resellers" : "Saved competitors"}</h2>
+        <p className="mt-1 text-xs text-slate-soft">
+          {mode === "reseller"
+            ? "Already know a reseller discovery hasn't found? Add them directly."
+            : "Already know a competitor discovery hasn't found? Add them directly."}
+        </p>
         <div className="mt-2">
-          <AddCompetitorForm onAdded={load} />
+          <AddCompetitorForm onAdded={load} relationshipType={mode} />
         </div>
         {savedSites && savedSites.length > 0 && (
           <div className="mt-4 space-y-2">
@@ -385,8 +435,8 @@ export default function DiscoveryPage() {
       {dismissedSites && dismissedSites.length > 0 && (
         <details className={cn(cardClassName, "mt-8 p-0")}>
           <summary className="cursor-pointer select-none px-4 py-2.5 text-xs font-medium text-slate">
-            Dismissed ({dismissedSites.length}) — a dismissed competitor is never re-suggested by discovery; restore
-            one here if you want it back
+            Dismissed ({dismissedSites.length}) — a dismissed {mode === "reseller" ? "reseller" : "competitor"} is
+            never re-suggested by discovery; restore one here if you want it back
           </summary>
           <div className="space-y-2 border-t border-border p-4">
             {dismissedSites.map((site) => (

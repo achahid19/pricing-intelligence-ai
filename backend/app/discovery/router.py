@@ -100,6 +100,7 @@ def _to_run_out(
         triggered_at=run.triggered_at,
         ai_provider=run.ai_provider,
         model=run.model,
+        mode=run.mode,
         status=run.status,
         error_message=run.error_message,
         search_count=search_count,
@@ -115,15 +116,19 @@ async def create_discovery_run(
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
-    """Trigger a competitor-discovery run: the workspace's active AI
-    provider researches the web (its own native search tool) and proposes
-    up to payload.max_candidates competitor sites with confidence + rationale.
-    Synchronous — a single web-search-enabled AI call, may take 10-30s."""
+    """Trigger a discovery run: the workspace's active AI provider
+    researches the web (its own native search tool) and proposes up to
+    payload.max_candidates sites with confidence + rationale — either
+    competitors (rival businesses, mode="competitor") or resellers of this
+    workspace's own products (mode="reseller", for MAP-compliance
+    monitoring). Synchronous — a single web-search-enabled AI call, may
+    take 10-30s."""
     max_candidates = payload.max_candidates
+    mode = payload.mode
 
     last_run_result = await db.execute(
         select(DiscoveryRun.triggered_at)
-        .where(DiscoveryRun.workspace_id == workspace.id)
+        .where(DiscoveryRun.workspace_id == workspace.id, DiscoveryRun.mode == mode)
         .order_by(DiscoveryRun.triggered_at.desc())
         .limit(1)
     )
@@ -159,16 +164,16 @@ async def create_discovery_run(
         workspace_id=workspace.id,
         ai_provider=active_config.provider,
         model=model,
+        mode=mode,
         context_snapshot={"context": context, "max_candidates": max_candidates},
         status="running",
     )
     db.add(run)
     await db.flush()
 
+    discover_fn = ai_client.discover_reseller_sites if mode == "reseller" else ai_client.discover_competitor_sites
     try:
-        result, search_count = await ai_client.discover_competitor_sites(
-            db, workspace.id, context, max_candidates=max_candidates
-        )
+        result, search_count = await discover_fn(db, workspace.id, context, max_candidates=max_candidates)
     except Exception as exc:
         run.status = "failed"
         run.error_message = str(exc)[:2000]
@@ -197,6 +202,7 @@ async def create_discovery_run(
                 discovery_run_id=run.id,
                 domain=domain,
                 name=candidate.get("name"),
+                relationship_type=mode,
                 confidence_score=confidence,
                 rationale=_strip_citations(candidate.get("rationale")) or "",
                 estimated_product_count=candidate.get("estimated_product_count"),
@@ -215,15 +221,14 @@ async def create_discovery_run(
 
 @router.get("/runs", response_model=list[DiscoveryRunOut])
 async def list_discovery_runs(
+    mode: Optional[str] = None,
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(DiscoveryRun)
-        .where(DiscoveryRun.workspace_id == workspace.id)
-        .options(selectinload(DiscoveryRun.sites))
-        .order_by(DiscoveryRun.triggered_at.desc())
-    )
+    query = select(DiscoveryRun).where(DiscoveryRun.workspace_id == workspace.id)
+    if mode:
+        query = query.where(DiscoveryRun.mode == mode)
+    result = await db.execute(query.options(selectinload(DiscoveryRun.sites)).order_by(DiscoveryRun.triggered_at.desc()))
     return [_to_run_out(run) for run in result.scalars().all()]
 
 
@@ -267,12 +272,13 @@ async def create_competitor_site_manually(
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
-    """Add a known competitor directly, skipping AI discovery — for when
-    the owner already knows a competitor discovery didn't (or hasn't been
+    """Add a known competitor or reseller directly, skipping AI discovery —
+    for when the owner already knows one discovery didn't (or hasn't been
     run at all yet). Saved immediately, no confidence/rationale since
     there's no AI judgment involved; if the domain is already known for
-    this workspace, that existing row is marked saved instead of creating
-    a duplicate."""
+    this workspace, that existing row is marked saved (and its
+    relationship_type updated, since a manual add is a deliberate,
+    trusted correction) instead of creating a duplicate."""
     domain = _normalize_domain(payload.domain)
     if not domain:
         raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail="Enter a domain.")
@@ -283,6 +289,7 @@ async def create_competitor_site_manually(
     existing = existing_result.scalars().first()
     if existing is not None:
         existing.status = "saved"
+        existing.relationship_type = payload.relationship_type
         if payload.name:
             existing.name = payload.name
         await db.commit()
@@ -294,6 +301,7 @@ async def create_competitor_site_manually(
         discovery_run_id=None,
         domain=domain,
         name=payload.name,
+        relationship_type=payload.relationship_type,
         confidence_score=None,
         rationale=None,
         estimated_product_count=None,
@@ -308,12 +316,15 @@ async def create_competitor_site_manually(
 @router.get("/sites", response_model=list[CompetitorSiteOut])
 async def list_competitor_sites(
     site_status: Optional[str] = None,
+    relationship_type: Optional[str] = None,
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(CompetitorSite).where(CompetitorSite.workspace_id == workspace.id)
     if site_status:
         query = query.where(CompetitorSite.status == site_status)
+    if relationship_type:
+        query = query.where(CompetitorSite.relationship_type == relationship_type)
     result = await db.execute(query.order_by(CompetitorSite.confidence_score.desc()))
     return result.scalars().all()
 

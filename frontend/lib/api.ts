@@ -168,6 +168,7 @@ export interface AiProviderConfig {
 }
 
 export type CompetitorSiteStatus = "candidate" | "saved" | "dismissed";
+export type DiscoveryMode = "competitor" | "reseller";
 
 export interface CompetitorSite {
   id: number;
@@ -175,6 +176,7 @@ export interface CompetitorSite {
   discovery_run_id: number | null;
   domain: string;
   name: string | null;
+  relationship_type: DiscoveryMode;
   confidence_score: number | null;
   rationale: string | null;
   estimated_product_count: number | null;
@@ -187,6 +189,7 @@ export interface DiscoveryRun {
   triggered_at: string;
   ai_provider: string;
   model: string;
+  mode: DiscoveryMode;
   status: "running" | "completed" | "failed";
   error_message: string | null;
   search_count: number | null;
@@ -297,19 +300,27 @@ export const api = {
     },
   },
   discovery: {
-    createRun: (maxCandidates: number) =>
+    createRun: (maxCandidates: number, mode: DiscoveryMode = "competitor") =>
       request<DiscoveryRun>("/discovery/runs", {
         method: "POST",
-        body: JSON.stringify({ max_candidates: maxCandidates }),
+        body: JSON.stringify({ max_candidates: maxCandidates, mode }),
       }),
-    listRuns: () => request<DiscoveryRun[]>("/discovery/runs"),
+    listRuns: (mode?: DiscoveryMode) => request<DiscoveryRun[]>(`/discovery/runs${mode ? `?mode=${mode}` : ""}`),
     getRun: (id: number) => request<DiscoveryRun>(`/discovery/runs/${id}`),
     updateSite: (id: number, status: CompetitorSiteStatus) =>
       request<CompetitorSite>(`/discovery/sites/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
-    listSites: (siteStatus?: CompetitorSiteStatus) =>
-      request<CompetitorSite[]>(`/discovery/sites${siteStatus ? `?site_status=${siteStatus}` : ""}`),
-    createSite: (domain: string, name?: string) =>
-      request<CompetitorSite>("/discovery/sites", { method: "POST", body: JSON.stringify({ domain, name }) }),
+    listSites: (siteStatus?: CompetitorSiteStatus, relationshipType?: DiscoveryMode) => {
+      const params = new URLSearchParams();
+      if (siteStatus) params.set("site_status", siteStatus);
+      if (relationshipType) params.set("relationship_type", relationshipType);
+      const qs = params.toString();
+      return request<CompetitorSite[]>(`/discovery/sites${qs ? `?${qs}` : ""}`);
+    },
+    createSite: (domain: string, name?: string, relationshipType: DiscoveryMode = "competitor") =>
+      request<CompetitorSite>("/discovery/sites", {
+        method: "POST",
+        body: JSON.stringify({ domain, name, relationship_type: relationshipType }),
+      }),
     getSite: (siteId: number) => request<CompetitorSite>(`/discovery/sites/${siteId}`),
     discoverProducts: (siteId: number, maxProducts: number) =>
       request<CompetitorProduct[]>(`/discovery/sites/${siteId}/products`, {

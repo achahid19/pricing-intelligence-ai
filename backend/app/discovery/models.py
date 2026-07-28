@@ -9,11 +9,14 @@ from app.db.database import Base
 
 class DiscoveryRun(Base):
     """
-    One AI-driven attempt to find competitor sites for a workspace.
-    `context_snapshot` records exactly what business context was sent (the
-    objectives/country/market/catalog summary actually used to build the
-    prompt) — not for display, but so a run's results stay explainable
-    after the workspace's own context has since changed.
+    One AI-driven attempt to find competitor OR reseller sites for a
+    workspace — `mode` distinguishes the two, since they're fundamentally
+    different research questions with opposite inclusion rules (see
+    CompetitorSite.relationship_type). `context_snapshot` records exactly
+    what business context was sent (the objectives/country/market/catalog
+    summary actually used to build the prompt) — not for display, but so a
+    run's results stay explainable after the workspace's own context has
+    since changed.
     """
     __tablename__ = "discovery_runs"
 
@@ -27,6 +30,7 @@ class DiscoveryRun(Base):
     )
     ai_provider: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
+    mode: Mapped[str] = mapped_column(Text, nullable=False, default="competitor")  # competitor|reseller
     context_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="running")  # running|completed|failed
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -38,13 +42,23 @@ class DiscoveryRun(Base):
 
 class CompetitorSite(Base):
     """
-    A competitor domain — either proposed by a DiscoveryRun (AI-sourced,
-    `discovery_run_id` set, confidence/rationale come from the AI) or added
-    directly by the user (`discovery_run_id` NULL, confidence/rationale
-    absent — a manual entry is trusted as-is, not a proposal to review).
-    `workspace_id` is denormalized here (not just reachable via the run)
-    specifically so manually-added sites — which have no run at all — can
-    still be scoped and deduplicated per workspace.
+    A competitor OR reseller domain — either proposed by a DiscoveryRun
+    (AI-sourced, `discovery_run_id` set, confidence/rationale come from the
+    AI) or added directly by the user (`discovery_run_id` NULL, confidence/
+    rationale absent — a manual entry is trusted as-is, not a proposal to
+    review). `workspace_id` is denormalized here (not just reachable via
+    the run) specifically so manually-added sites — which have no run at
+    all — can still be scoped and deduplicated per workspace.
+
+    `relationship_type` distinguishes two fundamentally different research
+    questions sharing one table/review workflow: "competitor" (another
+    business with its own rival product/brand — resellers/retailers are
+    explicitly excluded, see ai_client._DISCOVER_PROMPT_TEMPLATE) vs.
+    "reseller" (a business that advertises/sells THIS workspace's own
+    product — the inverse inclusion rule, needed for MAP-compliance
+    monitoring: checking whether resellers are advertising below the
+    minimum price set in Product.min_price). Default "competitor" so
+    existing rows and the common case need no extra decision.
 
     `status` starts "candidate" for AI proposals — the user reviews and
     either "saves" (tracked going forward, the seed for Phase 2's
@@ -63,6 +77,7 @@ class CompetitorSite(Base):
 
     domain: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    relationship_type: Mapped[str] = mapped_column(Text, nullable=False, default="competitor")  # competitor|reseller
     confidence_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0-100, AI-sourced only
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)  # AI-sourced only
     estimated_product_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

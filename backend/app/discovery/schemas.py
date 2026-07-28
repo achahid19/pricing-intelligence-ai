@@ -10,6 +10,11 @@ class DiscoveryRunCreate(BaseModel):
     # candidates means more AI reasoning/search cost with no cost-estimate
     # system in place yet (see docs/DECISIONS.md).
     max_candidates: int = Field(default=10, ge=1, le=25)
+    # "competitor" finds rival businesses (own-brand, resellers excluded);
+    # "reseller" finds businesses that advertise/sell THIS workspace's own
+    # products, for MAP-compliance monitoring — the inverse inclusion rule,
+    # only relevant to workspaces that selected that objective.
+    mode: Literal["competitor", "reseller"] = "competitor"
 
 
 class CompetitorSiteOut(BaseModel):
@@ -18,6 +23,7 @@ class CompetitorSiteOut(BaseModel):
     discovery_run_id: Optional[int]
     domain: str
     name: Optional[str]
+    relationship_type: str
     confidence_score: Optional[int]
     rationale: Optional[str]
     estimated_product_count: Optional[int]
@@ -27,11 +33,13 @@ class CompetitorSiteOut(BaseModel):
 
 
 class CompetitorSiteCreate(BaseModel):
-    """Manually add a known competitor, skipping AI discovery entirely —
-    trusted as-is, saved directly rather than starting as a candidate."""
+    """Manually add a known competitor or reseller, skipping AI discovery
+    entirely — trusted as-is, saved directly rather than starting as a
+    candidate."""
 
     domain: str = Field(min_length=1, max_length=255)
     name: Optional[str] = Field(default=None, max_length=255)
+    relationship_type: Literal["competitor", "reseller"] = "competitor"
 
 
 class DiscoveryRunOut(BaseModel):
@@ -40,6 +48,7 @@ class DiscoveryRunOut(BaseModel):
     triggered_at: datetime
     ai_provider: str
     model: str
+    mode: str
     status: str
     error_message: Optional[str]
     search_count: Optional[int] = None
