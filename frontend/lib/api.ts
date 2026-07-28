@@ -205,6 +205,8 @@ export interface CompetitorProduct {
   url: string;
   image_url: string | null;
   description: string | null;
+  stock_status: string | null;
+  additional_info: string | null;
   discovered_at: string;
   updated_at: string;
 }

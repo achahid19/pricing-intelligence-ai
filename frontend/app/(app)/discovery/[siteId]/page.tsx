@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, Check, ExternalLink, Sparkles, X } from "lucide-react";
 
 import { ConfidenceBadge } from "@/components/discovery/ConfidenceBadge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -367,21 +368,25 @@ export default function CompetitorProductsPage() {
         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {products?.map((p) => (
             <Card key={p.id}>
-              <a
-                href={p.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-medium text-ink hover:text-accent"
-              >
-                {p.title}
-                <ExternalLink className="size-3" />
-              </a>
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={p.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 font-medium text-ink hover:text-accent"
+                >
+                  {p.title}
+                  <ExternalLink className="size-3" />
+                </a>
+                {p.stock_status && <Badge tone="neutral">{p.stock_status}</Badge>}
+              </div>
               {p.price != null && (
                 <p className="mt-0.5 text-xs tabular-nums text-slate-soft">
                   {p.currency} {p.price}
                 </p>
               )}
               {p.description && <p className="mt-2 text-sm text-slate">{p.description}</p>}
+              {p.additional_info && <p className="mt-1 text-xs text-slate-soft">{p.additional_info}</p>}
             </Card>
           ))}
         </div>

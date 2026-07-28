@@ -298,15 +298,31 @@ async def discover_competitor_sites(
 _DISCOVER_PRODUCTS_PROMPT_TEMPLATE = (
     "You are researching real products currently offered by {label}, a known competitor "
     "business, using web search — not guessing from memory or training data. Use your web "
-    "search tool to browse this specific site and find products they actually sell.\n\n"
-    "Search {domain} and identify up to {max_products} real products currently listed for "
-    "sale, with pricing where you can find it.\n\n"
+    "search tool to actually browse this site's pricing, plans, and product/category pages "
+    "in detail — not just the homepage or a single search snippet.\n\n"
+    "Search {domain} and identify up to {max_products} real, distinct products or plans "
+    "currently offered. IMPORTANT: many business sites show several products, plans, or "
+    "tiers on a single page (a pricing table with multiple plans, a category page listing "
+    "several items) — when you find a page like that, extract EACH distinct product or plan "
+    "as its own separate entry. Never collapse multiple offerings into one combined entry "
+    "just because they appeared on the same page. Use the most specific URL available for "
+    "each one (its own page if it has one, otherwise the listing/pricing page it came from).\n\n"
+    "For each product, capture whatever you actually found on the page:\n"
+    "- name and a factual 1-2 sentence description\n"
+    "- price and currency, if shown\n"
+    "- stock or availability, if the page indicates it (e.g. \"in stock\", \"sold out\", "
+    "\"limited availability\", \"pre-order\") — null if the page doesn't show this\n"
+    "- any other specifics worth noting (specs, capacity, contract length, included "
+    "features, setup fees, etc.) as a short free-text note — null if there's nothing beyond "
+    "the description\n\n"
     "Respond with ONLY a JSON object, no markdown fences, no commentary before or after: "
     '{{"products": [{{"title": "<product name>", '
     '"price": <numeric price only, no currency symbol, or null if you could not find one>, '
     '"currency": "<3-letter currency code if determinable, else null>", '
     '"url": "<the specific product page URL you found this on>", '
-    '"description": "<a factual 1-2 sentence description>"}}]}}'
+    '"description": "<a factual 1-2 sentence description>", '
+    '"stock_status": "<a short availability note if the page shows one, else null>", '
+    '"additional_info": "<other useful specifics actually found on the page, else null>"}}]}}'
 )
 
 

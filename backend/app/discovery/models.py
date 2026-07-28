@@ -109,6 +109,14 @@ class CompetitorProduct(Base):
     url: Mapped[str] = mapped_column(Text, nullable=False)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Best-effort, AI-observed — not a real inventory feed, just whatever
+    # availability signal (or lack of one) was visible on the page.
+    stock_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Free-text catch-all for whatever else was actually useful on the page
+    # (specs, capacity, contract terms, included features) — deliberately
+    # not a fixed set of structured attribute columns, since what's worth
+    # capturing varies enormously by product type.
+    additional_info: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     discovered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

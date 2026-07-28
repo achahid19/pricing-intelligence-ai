@@ -64,6 +64,8 @@ class CompetitorProductOut(BaseModel):
     url: str
     image_url: Optional[str]
     description: Optional[str]
+    stock_status: Optional[str]
+    additional_info: Optional[str]
     discovered_at: datetime
     updated_at: datetime
 

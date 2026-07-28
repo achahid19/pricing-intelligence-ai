@@ -50,6 +50,20 @@ def _check_cooldown(last_at: Optional[datetime]) -> None:
         )
 
 
+_MARKDOWN_CITATION_RE = re.compile(r"\s*\(\[[^\]]+\]\(https?://[^)]+\)\)")
+
+
+def _strip_citations(text: Optional[str]) -> Optional[str]:
+    """Web-search-enabled responses sometimes embed an inline markdown
+    citation like "([genious.ma](https://...))" right in a text field —
+    it renders as literal text, not a link, wherever we just display the
+    field as plain text, so strip it before storing rather than leaving
+    visual noise in the data for every future consumer (matching, reports)."""
+    if not text:
+        return text
+    return _MARKDOWN_CITATION_RE.sub("", text).strip() or None
+
+
 def _normalize_domain(raw: str) -> str:
     """Strip scheme, a leading www., and any trailing path/slash — so
     "https://www.example.com/" and "example.com" are recognized as the same
@@ -346,7 +360,11 @@ async def discover_products_for_site(
     existing_result = await db.execute(
         select(CompetitorProduct).where(CompetitorProduct.competitor_site_id == site.id)
     )
-    existing_by_url = {p.url: p for p in existing_result.scalars().all()}
+    # Keyed on (url, title), not url alone — a single pricing/listing page
+    # legitimately lists several distinct products under the same URL when
+    # they don't each have their own page, so url alone would silently
+    # collapse multiple real products onto one row within the same run.
+    existing_by_key = {(p.url, p.title): p for p in existing_result.scalars().all()}
 
     for candidate in result.get("products", [])[: payload.max_products]:
         title = (candidate.get("title") or "").strip()
@@ -359,12 +377,17 @@ async def discover_products_for_site(
         except (TypeError, ValueError):
             price = None
 
-        existing = existing_by_url.get(url)
+        description = _strip_citations(candidate.get("description"))
+        additional_info = _strip_citations(candidate.get("additional_info"))
+
+        key = (url, title)
+        existing = existing_by_key.get(key)
         if existing is not None:
-            existing.title = title
             existing.price = price
             existing.currency = candidate.get("currency")
-            existing.description = candidate.get("description")
+            existing.description = description
+            existing.stock_status = candidate.get("stock_status")
+            existing.additional_info = additional_info
         else:
             product = CompetitorProduct(
                 workspace_id=workspace.id,
@@ -373,10 +396,12 @@ async def discover_products_for_site(
                 price=price,
                 currency=candidate.get("currency"),
                 url=url,
-                description=candidate.get("description"),
+                description=description,
+                stock_status=candidate.get("stock_status"),
+                additional_info=additional_info,
             )
             db.add(product)
-            existing_by_url[url] = product
+            existing_by_key[key] = product
 
     site.products_discovered_at = datetime.now(timezone.utc)
     await db.commit()
