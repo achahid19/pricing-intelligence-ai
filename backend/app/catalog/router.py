@@ -127,6 +127,8 @@ _HEADER_MAP = {
     "name": "name", "product": "name", "product name": "name", "nom": "name",
     "sku": "sku", "reference": "sku", "ref": "sku",
     "price": "price", "your price": "price", "prix": "price",
+    "min_price": "min_price", "minimum price": "min_price", "min price": "min_price",
+    "map": "min_price", "map price": "min_price", "prix map": "min_price",
     "currency": "currency", "devise": "currency",
     "category": "category", "catégorie": "category", "categorie": "category",
     "brand": "brand", "marque": "brand",
@@ -136,7 +138,7 @@ _HEADER_MAP = {
 
 # Canonical column order for the downloadable template — mirrors the
 # required/optional split documented on import_products() below.
-_TEMPLATE_HEADERS = ["name", "price", "currency", "sku", "category", "brand", "barcode", "description"]
+_TEMPLATE_HEADERS = ["name", "price", "min_price", "currency", "sku", "category", "brand", "barcode", "description"]
 
 
 def _parse_import_rows(filename: str, content: bytes) -> list[dict]:
@@ -195,9 +197,9 @@ async def import_products(
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk-create products from a CSV or Excel file. Columns: name, price
-    (required); sku, currency, category, brand, barcode, description
-    (optional). Existing SKUs/names in this workspace are skipped, never
-    overwritten."""
+    (required); sku, min_price (MAP floor), currency, category, brand,
+    barcode, description (optional). Existing SKUs/names in this workspace
+    are skipped, never overwritten."""
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large (max 5 MB)")
@@ -235,6 +237,21 @@ async def import_products(
             errors.append(f"Row {i} ({name}): price must be positive")
             continue
 
+        # Optional — unlike price, a malformed min_price shouldn't fail the
+        # whole row, since it's a bonus MAP-compliance field, not required
+        # for the product to exist at all.
+        min_price = None
+        raw_min_price = (row.get("min_price") or "").replace(" ", "")
+        if raw_min_price:
+            if "," in raw_min_price and "." not in raw_min_price:
+                raw_min_price = raw_min_price.replace(",", ".")
+            try:
+                parsed_min_price = Decimal(raw_min_price)
+                if parsed_min_price > 0:
+                    min_price = parsed_min_price.quantize(Decimal("0.01"))
+            except (InvalidOperation, ValueError):
+                pass
+
         sku = row.get("sku") or None
         if sku and sku.lower() in existing_skus:
             skipped.append(f"{name}: SKU '{sku}' already exists")
@@ -247,6 +264,7 @@ async def import_products(
             workspace_id=workspace.id,
             name=name,
             price=price.quantize(Decimal("0.01")),
+            min_price=min_price,
             currency=(row.get("currency") or "USD").upper()[:3],
             sku=sku,
             category=row.get("category") or None,

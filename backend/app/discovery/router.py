@@ -367,7 +367,12 @@ async def discover_products_for_site(
 
     try:
         result, _search_count = await ai_client.discover_competitor_products(
-            db, workspace.id, site.domain, site.name, max_products=payload.max_products
+            db,
+            workspace.id,
+            site.domain,
+            site.name,
+            max_products=payload.max_products,
+            relationship_type=site.relationship_type,
         )
     except Exception as exc:
         raise HTTPException(

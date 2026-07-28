@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
@@ -27,7 +28,16 @@ async def signup(payload: SignupRequest, db: AsyncSession = Depends(get_db)):
         hashed_password=hash_password(payload.password),
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # The SELECT check above and this INSERT aren't atomic — a
+        # concurrent signup for the same email can slip between them and
+        # hit the DB's unique constraint instead. Without this, that race
+        # surfaces as a raw 500 rather than the same clean 409 the earlier
+        # check normally gives.
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     await db.refresh(user)
 
     token = create_access_token(user_id=user.id, workspace_id=workspace.id)

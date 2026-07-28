@@ -366,11 +366,33 @@ async def discover_reseller_sites(
     return await _run_web_search_prompt(db, workspace_id, prompt, max_candidates)
 
 
+# Two different intros, same as the site-discovery templates above — a
+# reseller site isn't a rival with its own catalog to browse generically,
+# it's a channel carrying THIS business's own products, so the AI needs to
+# be told that or it has no reason to focus on the relevant listings rather
+# than the reseller's entire (often huge, unrelated) inventory.
+_DISCOVER_PRODUCTS_INTRO = {
+    "competitor": (
+        "You are researching real products currently offered by {label}, a known competitor "
+        "business, using web search — not guessing from memory or training data. Use your web "
+        "search tool to actually browse this site's pricing, plans, and product/category pages "
+        "in detail — not just the homepage or a single search snippet."
+    ),
+    "reseller": (
+        "You are researching real listings for THIS business's own products on {label}'s site, "
+        "using web search — not guessing from memory or training data. {label} is a reseller, "
+        "retailer, distributor, or marketplace known to carry this business's own products (for "
+        "MAP — minimum advertised price — compliance monitoring), not a rival with its own "
+        "competing brand. Focus specifically on listings for this business's own products, not "
+        "the reseller's entire unrelated catalog. Use your web search tool to actually browse "
+        "this site's relevant product and pricing pages in detail — not just the homepage or a "
+        "single search snippet."
+    ),
+}
+
+
 _DISCOVER_PRODUCTS_PROMPT_TEMPLATE = (
-    "You are researching real products currently offered by {label}, a known competitor "
-    "business, using web search — not guessing from memory or training data. Use your web "
-    "search tool to actually browse this site's pricing, plans, and product/category pages "
-    "in detail — not just the homepage or a single search snippet.\n\n"
+    "{intro}\n\n"
     "Search {domain} and identify up to {max_products} real, distinct products or plans "
     "currently offered. IMPORTANT: many business sites show several products, plans, or "
     "tiers on a single page (a pricing table with multiple plans, a category page listing "
@@ -398,18 +420,29 @@ _DISCOVER_PRODUCTS_PROMPT_TEMPLATE = (
 
 
 async def discover_competitor_products(
-    db: AsyncSession, workspace_id: int, domain: str, name: Optional[str], max_products: int = 15
+    db: AsyncSession,
+    workspace_id: int,
+    domain: str,
+    name: Optional[str],
+    max_products: int = 15,
+    relationship_type: str = "competitor",
 ) -> tuple[dict, Optional[int]]:
     """Ask the workspace's active AI provider to browse a specific saved
-    competitor's site (via its native web search tool) and list real
-    products found there. Same dispatch shape as discover_competitor_sites
-    — reused deliberately rather than adding a per-provider fetch/url-
-    context tool: none of the three providers render JavaScript anyway, so
-    a dedicated fetch tool wouldn't close that gap. See
-    _run_web_search_prompt for the return shape and NoActiveProviderError
-    behavior."""
+    competitor or reseller site (via its native web search tool) and list
+    real products found there. relationship_type selects which intro frames
+    the request — a reseller site needs to be told it's specifically
+    carrying the workspace's own products (see _DISCOVER_PRODUCTS_INTRO),
+    not treated like a rival's generic catalog. Same dispatch shape as
+    discover_competitor_sites — reused deliberately rather than adding a
+    per-provider fetch/url-context tool: none of the three providers render
+    JavaScript anyway, so a dedicated fetch tool wouldn't close that gap.
+    See _run_web_search_prompt for the return shape and
+    NoActiveProviderError behavior."""
     label = f"{name} ({domain})" if name else domain
-    prompt = _DISCOVER_PRODUCTS_PROMPT_TEMPLATE.format(label=label, domain=domain, max_products=max_products)
+    intro_template = _DISCOVER_PRODUCTS_INTRO.get(relationship_type, _DISCOVER_PRODUCTS_INTRO["competitor"])
+    prompt = _DISCOVER_PRODUCTS_PROMPT_TEMPLATE.format(
+        intro=intro_template.format(label=label), domain=domain, max_products=max_products
+    )
     return await _run_web_search_prompt(db, workspace_id, prompt, max_products)
 
 
