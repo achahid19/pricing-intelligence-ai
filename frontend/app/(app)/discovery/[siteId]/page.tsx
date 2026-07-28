@@ -159,10 +159,13 @@ function CompetitorProductChip({ product }: { product: CompetitorProduct }) {
   );
 }
 
+type ProductView = "products" | "auto-match" | "manual";
+
 export default function CompetitorProductsPage() {
   const params = useParams<{ siteId: string }>();
   const siteId = Number(params.siteId);
 
+  const [view, setView] = useState<ProductView>("products");
   const [site, setSite] = useState<CompetitorSite | null>(null);
   const [products, setProducts] = useState<CompetitorProduct[] | null>(null);
   const [ownProducts, setOwnProducts] = useState<Product[] | null>(null);
@@ -203,6 +206,7 @@ export default function CompetitorProductsPage() {
   }, [matches]);
   const allCandidatesSelected =
     candidateMatches.length > 0 && candidateMatches.every((m) => selectedIds.has(m.id));
+  const confirmedMatchCount = useMemo(() => (matches ?? []).filter((m) => m.status === "confirmed").length, [matches]);
 
   async function handleDiscover() {
     setError(null);
@@ -358,51 +362,79 @@ export default function CompetitorProductsPage() {
         <p className="mt-4 text-sm text-slate-soft">This can take up to 30 seconds — your AI provider is actively searching the web.</p>
       )}
 
-      <div className="mt-8">
-        <h2 className="text-sm font-medium text-ink">
-          {products ? `${products.length} product${products.length === 1 ? "" : "s"} found` : "Loading…"}
-        </h2>
-        {products && products.length === 0 && (
-          <p className="mt-2 text-sm text-slate">No products discovered yet — click "Discover products" above.</p>
-        )}
-        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {products?.map((p) => (
-            <Card key={p.id}>
-              <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href={p.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 font-medium text-ink hover:text-accent"
-                >
-                  {p.title}
-                  <ExternalLink className="size-3" />
-                </a>
-                {p.stock_status && <Badge tone="neutral">{p.stock_status}</Badge>}
-              </div>
-              {p.price != null && (
-                <p className="mt-0.5 text-xs tabular-nums text-slate-soft">
-                  {p.currency} {p.price}
-                </p>
-              )}
-              {p.description && <p className="mt-2 text-sm text-slate">{p.description}</p>}
-              {p.additional_info && <p className="mt-1 text-xs text-slate-soft">{p.additional_info}</p>}
-            </Card>
-          ))}
-        </div>
+      {/* Tabs, not always-expanded sections — browsing discovered products,
+          reviewing AI match candidates, and manually pairing products are
+          three separate tasks a user does one at a time, not something
+          meant to be scanned together. */}
+      <div className="mt-8 flex items-center gap-1 border-b border-border">
+        {(
+          [
+            ["products", "Products", products?.length],
+            ["auto-match", "Auto-match", candidateMatches.length],
+            ["manual", "Manual matching", confirmedMatchCount],
+          ] as const
+        ).map(([key, label, count]) => (
+          <button
+            key={key}
+            onClick={() => setView(key)}
+            className={cn(
+              "border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+              view === key ? "border-accent text-ink" : "border-transparent text-slate-soft hover:text-ink"
+            )}
+          >
+            {label}
+            {count != null && count > 0 && <span className="ml-1 tabular-nums opacity-70">({count})</span>}
+          </button>
+        ))}
       </div>
 
-      {products && products.length > 0 && (
-        <div className="mt-8">
+      {view === "products" && (
+        <div className="mt-6">
+          {!products && <p className="text-sm text-slate-soft">Loading…</p>}
+          {products && products.length === 0 && (
+            <p className="text-sm text-slate">No products discovered yet — click "Discover products" above.</p>
+          )}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {products?.map((p) => (
+              <Card key={p.id}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={p.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-medium text-ink hover:text-accent"
+                  >
+                    {p.title}
+                    <ExternalLink className="size-3" />
+                  </a>
+                  {p.stock_status && <Badge tone="neutral">{p.stock_status}</Badge>}
+                </div>
+                {p.price != null && (
+                  <p className="mt-0.5 text-xs tabular-nums text-slate-soft">
+                    {p.currency} {p.price}
+                  </p>
+                )}
+                {p.description && <p className="mt-2 text-sm text-slate">{p.description}</p>}
+                {p.additional_info && <p className="mt-1 text-xs text-slate-soft">{p.additional_info}</p>}
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {view === "auto-match" && (
+        <div className="mt-6">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-ink">Auto-match with your catalog</h2>
-            <Button variant="outline" size="sm" onClick={handleAutoMatch} disabled={matching}>
+            <Button variant="outline" size="sm" onClick={handleAutoMatch} disabled={matching || !products?.length}>
               <Sparkles className="size-3.5" />
               {matching ? "Matching…" : "Auto-match"}
             </Button>
           </div>
 
-          {candidateMatches.length > 0 && (
+          {!products?.length ? (
+            <p className="mt-3 text-sm text-slate">Discover products first, then auto-match against your catalog.</p>
+          ) : candidateMatches.length > 0 ? (
             <>
               <div className="mt-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
@@ -446,39 +478,47 @@ export default function CompetitorProductsPage() {
                 ))}
               </div>
             </>
+          ) : (
+            <p className="mt-3 text-sm text-slate">No candidates to review — click "Auto-match" above.</p>
           )}
         </div>
       )}
 
-      {products && products.length > 0 && (
-        <div className="mt-8">
+      {view === "manual" && (
+        <div className="mt-6">
           <h2 className="text-sm font-medium text-ink">Manual matching</h2>
-          <p className="mt-1 text-xs text-slate-soft">Drag a competitor product onto one of your own to pair them.</p>
-          <div className="mt-2 grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div>
-              <p className="text-xs font-medium text-slate-soft">Your products</p>
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {ownProducts?.map((p) => (
-                  <OwnProductDropTarget
-                    key={p.id}
-                    product={p}
-                    confirmedMatches={confirmedByProduct[p.id] ?? []}
-                    competitorProductById={competitorProductById}
-                    onUnmatch={handleUnmatch}
-                    onDropCompetitorProduct={handleManualMatch}
-                  />
-                ))}
+          {!products?.length ? (
+            <p className="mt-3 text-sm text-slate">Discover products first, then drag one onto one of your own to pair them.</p>
+          ) : (
+            <>
+              <p className="mt-1 text-xs text-slate-soft">Drag a competitor product onto one of your own to pair them.</p>
+              <div className="mt-2 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div>
+                  <p className="text-xs font-medium text-slate-soft">Your products</p>
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {ownProducts?.map((p) => (
+                      <OwnProductDropTarget
+                        key={p.id}
+                        product={p}
+                        confirmedMatches={confirmedByProduct[p.id] ?? []}
+                        competitorProductById={competitorProductById}
+                        onUnmatch={handleUnmatch}
+                        onDropCompetitorProduct={handleManualMatch}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-slate-soft">{site.name || site.domain}&rsquo;s products</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {products.map((p) => (
+                      <CompetitorProductChip key={p.id} product={p} />
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-soft">{site.name || site.domain}&rsquo;s products</p>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {products.map((p) => (
-                  <CompetitorProductChip key={p.id} product={p} />
-                ))}
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </div>
       )}
     </div>
