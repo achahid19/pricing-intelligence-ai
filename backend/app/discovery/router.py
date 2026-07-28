@@ -198,7 +198,7 @@ async def create_discovery_run(
                 domain=domain,
                 name=candidate.get("name"),
                 confidence_score=confidence,
-                rationale=candidate.get("rationale") or "",
+                rationale=_strip_citations(candidate.get("rationale")) or "",
                 estimated_product_count=candidate.get("estimated_product_count"),
                 status="candidate",
             )

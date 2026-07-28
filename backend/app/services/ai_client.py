@@ -145,20 +145,34 @@ async def describe_product_image(
 
 
 _DISCOVER_PROMPT_TEMPLATE = (
-    "You are researching real, currently-operating competitor businesses using web search — "
+    "You are researching real, currently-operating competitor BUSINESSES using web search — "
     "not guessing from memory or training data. Use your web search tool to find actual companies.\n\n"
     "Business context:\n{context}\n\n"
     "Search the web and identify up to {max_candidates} real competitor businesses: companies "
-    "selling similar products or services, at a similar price tier, to a similar customer base — "
+    "that own and sell their own competing product or service to the same customer base — "
     "weigh the specific products and their descriptions above more heavily than the category "
     "labels or industry name alone, since two businesses in the same industry can target very "
-    "different customers. Do not include this business's own website as a candidate. For each "
-    "one, base your confidence on what you actually found, not assumptions.\n\n"
+    "different customers.\n\n"
+    "CRITICAL — exclude anyone who is not a true business-model rival: do NOT include "
+    "resellers, retailers, marketplaces, distributors, affiliates, or price-comparison sites "
+    "that merely sell or list many different companies' products (even in the same category, "
+    "even if that includes this business's own products) rather than operating their own "
+    "distinct, competing product or brand. A real competitor is another company with its own "
+    "rival offering — for example, if this business made and sold a soft drink, a real "
+    "competitor is another soft-drink maker with its own rival brand (e.g. a competing cola or "
+    "soda), NOT a supermarket, convenience store, or online retailer that simply stocks many "
+    "brands including this one. If you're unsure whether a candidate operates its own "
+    "competing offering or is just reselling/distributing others', leave it out rather than "
+    "guessing. Do not include this business's own website as a candidate. For each candidate "
+    "you do include, base your confidence on what you actually found, not assumptions, and "
+    "explicitly confirm in the rationale that they sell their own product/brand, not someone "
+    "else's.\n\n"
     "Respond with ONLY a JSON object, no markdown fences, no commentary before or after: "
     '{{"candidates": [{{"domain": "<bare domain, e.g. example.com, no scheme or path>", '
     '"name": "<company name>", '
     '"confidence": <integer 0-100, how well this is actually a competitor based on what you found>, '
-    '"rationale": "<1-2 sentences explaining the match, citing specific products/categories or '
+    '"rationale": "<1-2 sentences explaining the match AND confirming this is their own '
+    'product/brand, not a reseller/retailer/marketplace, citing specific products/categories or '
     'price positioning you compared, not just \\"same industry\\">", '
     '"estimated_product_count": <integer estimate if you can tell from what you found, else null>}}]}}'
 )
