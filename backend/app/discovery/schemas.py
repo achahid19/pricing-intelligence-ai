@@ -51,7 +51,10 @@ class DiscoveryRunOut(BaseModel):
 
 
 class CompetitorSiteUpdate(BaseModel):
-    status: Literal["saved", "dismissed"]
+    # "candidate" is included so a dismissed site can be restored back into
+    # the review queue — a dismissal isn't otherwise reachable anywhere in
+    # the UI once made, which is the whole reason this needed to be undoable.
+    status: Literal["candidate", "saved", "dismissed"]
 
 
 class CompetitorProductOut(BaseModel):

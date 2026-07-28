@@ -26,7 +26,7 @@ function SiteCard({
   onToggleSelect,
 }: {
   site: CompetitorSite;
-  onUpdate: (id: number, status: "saved" | "dismissed") => void;
+  onUpdate: (id: number, status: "candidate" | "saved" | "dismissed") => void;
   updating: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
@@ -102,6 +102,15 @@ function SiteCard({
               </button>
             </>
           )}
+          {site.status === "dismissed" && (
+            <button
+              onClick={() => onUpdate(site.id, "candidate")}
+              disabled={updating}
+              className="rounded-md px-2 py-1 text-xs font-medium text-slate transition-colors hover:bg-black/[0.03] hover:text-ink"
+            >
+              Restore
+            </button>
+          )}
         </div>
       </div>
     </Card>
@@ -169,6 +178,7 @@ export default function DiscoveryPage() {
   const [runs, setRuns] = useState<DiscoveryRun[] | null>(null);
   const [candidates, setCandidates] = useState<CompetitorSite[] | null>(null);
   const [savedSites, setSavedSites] = useState<CompetitorSite[] | null>(null);
+  const [dismissedSites, setDismissedSites] = useState<CompetitorSite[] | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRunNote, setLastRunNote] = useState<string | null>(null);
@@ -183,6 +193,7 @@ export default function DiscoveryPage() {
     // older run's un-actioned suggestions shouldn't just disappear.
     api.discovery.listSites("candidate").then(setCandidates).catch(() => setCandidates([]));
     api.discovery.listSites("saved").then(setSavedSites).catch(() => setSavedSites([]));
+    api.discovery.listSites("dismissed").then(setDismissedSites).catch(() => setDismissedSites([]));
   }, []);
 
   useEffect(() => {
@@ -208,7 +219,7 @@ export default function DiscoveryPage() {
     }
   }
 
-  async function handleUpdate(id: number, status: "saved" | "dismissed") {
+  async function handleUpdate(id: number, status: "candidate" | "saved" | "dismissed") {
     setUpdatingId(id);
     try {
       await api.discovery.updateSite(id, status);
@@ -370,6 +381,20 @@ export default function DiscoveryPage() {
           </div>
         )}
       </div>
+
+      {dismissedSites && dismissedSites.length > 0 && (
+        <details className={cn(cardClassName, "mt-8 p-0")}>
+          <summary className="cursor-pointer select-none px-4 py-2.5 text-xs font-medium text-slate">
+            Dismissed ({dismissedSites.length}) — a dismissed competitor is never re-suggested by discovery; restore
+            one here if you want it back
+          </summary>
+          <div className="space-y-2 border-t border-border p-4">
+            {dismissedSites.map((site) => (
+              <SiteCard key={site.id} site={site} onUpdate={handleUpdate} updating={updatingId === site.id} />
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
