@@ -5,20 +5,14 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 
 import { ConfidenceBadge } from "@/components/discovery/ConfidenceBadge";
-import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { api, ApiError, type TrackedMatch } from "@/lib/api";
+import { priceDelta } from "@/lib/pricing";
 
 const MATCH_CONFIDENCE_TOOLTIP =
   "The AI's own self-assessed confidence that these are genuinely the same or a directly comparable item — not a verified metric.";
-
-function priceDelta(ownPrice: number, competitorPrice: number): { label: string; tone: BadgeTone } {
-  const diffPct = ((competitorPrice - ownPrice) / ownPrice) * 100;
-  if (Math.abs(diffPct) < 1) return { label: "Same price", tone: "neutral" };
-  if (diffPct > 0) return { label: `${diffPct.toFixed(0)}% pricier than you`, tone: "good" };
-  return { label: `${Math.abs(diffPct).toFixed(0)}% cheaper than you`, tone: "danger" };
-}
 
 function CompetitorRow({ match }: { match: TrackedMatch }) {
   const ownPrice = Number(match.product_price);

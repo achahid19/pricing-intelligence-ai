@@ -182,12 +182,12 @@ _MAX_SAMPLE_PRODUCTS = 15
 _MAX_DESCRIPTION_CHARS = 300
 
 
-def build_discovery_context(workspace, products: list) -> str:
-    """Renders a workspace's business context + catalog summary into the
-    text block sent to discover_competitor_sites(). Deliberately a bounded
-    sample with descriptions, not the full catalog — enough for the AI to
-    understand what's actually sold, not just names or category labels,
-    without letting prompt size grow with catalog size."""
+def _render_business_context(workspace) -> list[str]:
+    """The objectives/country/market/website block only — shared by
+    build_discovery_context (which appends a catalog sample on top) and
+    generate_report_narrative (which doesn't need one: the report's own
+    price-comparison table already tells the AI what's sold and at what
+    price, in more relevant detail than a generic catalog sample)."""
     lines = []
     if workspace.objectives_selected:
         lines.append(f"Objectives: {', '.join(workspace.objectives_selected)}")
@@ -199,6 +199,16 @@ def build_discovery_context(workspace, products: list) -> str:
         lines.append(f"Industry/market: {workspace.market}")
     if workspace.website:
         lines.append(f"Business website: {workspace.website}")
+    return lines
+
+
+def build_discovery_context(workspace, products: list) -> str:
+    """Renders a workspace's business context + catalog summary into the
+    text block sent to discover_competitor_sites(). Deliberately a bounded
+    sample with descriptions, not the full catalog — enough for the AI to
+    understand what's actually sold, not just names or category labels,
+    without letting prompt size grow with catalog size."""
+    lines = _render_business_context(workspace)
 
     categories = sorted({p.category for p in products if p.category})
     if categories:
@@ -537,5 +547,155 @@ async def match_products(
         )
         resp = await client.aio.models.generate_content(model=model, contents=[prompt])
         return _extract_json_object(resp.text), None
+
+    raise ValueError(f"Unknown provider: {config.provider}")
+
+
+# Same "hard safety cap" reasoning as _MAX_MATCH_OWN_PRODUCTS — this many
+# rows is already far more than any real report needs to make its point.
+_MAX_NARRATIVE_ROWS = 200
+
+_OBJECTIVE_GUIDANCE = {
+    "market_research": (
+        "landscape/positioning observations — how this business's pricing compares to the competitive set "
+        "overall, notable gaps or clusters worth knowing about."
+    ),
+    "price_alignment": (
+        "specific price-adjustment suggestions for individual products meaningfully out of line with tracked "
+        "competitors, citing the product by name and the direction/magnitude."
+    ),
+    "map_compliance": (
+        "concrete next steps for any reseller MAP violations found — which reseller to contact and about which "
+        "product — or explicit confirmation there are none this period."
+    ),
+}
+
+_REPORT_NARRATIVE_PROMPT_TEMPLATE = (
+    "You are writing a periodic competitor-pricing report for a business, based ENTIRELY on already-computed, "
+    "already-correct data below — you are not researching anything new and must not invent, alter, or "
+    "second-guess any number in it. Your only job is to write prose: an executive summary and recommendations.\n\n"
+    "Business context:\n{business_context}\n\n"
+    "{since_last_time}"
+    "Price comparison across every tracked (confirmed) competitor match ({match_count} matches):\n"
+    "{price_comparison_text}\n\n"
+    "IMPORTANT — some rows are marked \"different currency, not directly comparable\" because this data has no "
+    "currency conversion. For those rows, never describe one price as higher/lower/cheaper/pricier than the "
+    "other, and never characterize the size of a gap between them — the raw numbers alone tell you nothing "
+    "about which is actually more expensive. Only make a higher/lower/percentage claim about a pair when a "
+    "percentage difference is explicitly given in that row.\n\n"
+    "Alerts already flagged by the system (these are already decided facts — write about them, don't re-derive "
+    "or second-guess them):\n{alerts_text}\n\n"
+    "Write:\n"
+    "1. An executive summary (2-4 sentences, plain and factual, no invented numbers beyond what's given above; "
+    "if a previous report's summary is given, note the most important change(s) since then).\n"
+    "2. Recommendations, ONLY for these selected business objectives: {objectives_list}. For each objective:\n"
+    "{guidance_lines}\n"
+    "If there is nothing meaningful to say for a given objective given the data above, omit it rather than "
+    "padding.\n\n"
+    "Respond with ONLY a JSON object, no markdown fences, no commentary before or after: "
+    '{{"executive_summary": "<2-4 sentences>", '
+    '"recommendations": [{{"objective": "<one of: {objectives_list}>", '
+    '"text": "<1-2 sentence, specific, actionable recommendation>"}}]}}'
+)
+
+
+def _format_comparison_rows_for_narrative(rows: list[dict]) -> str:
+    lines = []
+    for r in rows[:_MAX_NARRATIVE_ROWS]:
+        own = f"{r['product_name']} (yours: {r['product_currency']} {r['product_price']:.2f}"
+        if r["product_min_price"] is not None:
+            own += f", MAP {r['product_min_price']:.2f}"
+        own += ")"
+        competitor_label = r["competitor_site_name"] or r["competitor_site_domain"]
+        if r["competitor_product_price"] is not None:
+            comp = f'vs {competitor_label}\'s "{r["competitor_product_title"]}" at {r["competitor_product_currency"]} {r["competitor_product_price"]:.2f}'
+            if r["same_currency"] and r["price_delta_pct"] is not None:
+                comp += f" ({r['price_delta_pct']:+.1f}% vs yours)"
+            elif not r["same_currency"]:
+                comp += " — different currency, not directly comparable"
+        else:
+            comp = f'vs {competitor_label}\'s "{r["competitor_product_title"]}" (no price found)'
+        lines.append(f"- {own} {comp}")
+    return "\n".join(lines) if lines else "(none)"
+
+
+def _format_alerts_for_narrative(alerts: list[dict]) -> str:
+    if not alerts:
+        return "No alerts this period."
+    return "\n".join(f"- [{a['type']}] {a['message']}" for a in alerts[:_MAX_NARRATIVE_ROWS])
+
+
+async def generate_report_narrative(
+    db: AsyncSession,
+    workspace_id: int,
+    workspace,
+    price_comparison: list[dict],
+    alerts: list[dict],
+    previous_executive_summary: Optional[str] = None,
+) -> dict:
+    """Ask the workspace's active AI provider to write an executive summary
+    + recommendations OVER already-computed, already-correct data —
+    reporting/service.py has already decided every number and every alert;
+    this call only ever produces prose about them (see CLAUDE.md's "AI
+    narrates on top of deterministic data" rule). No web search — pure
+    reasoning over data already in hand, same non-search dispatch shape as
+    match_products(). Raises NoActiveProviderError if none configured."""
+    config = await _get_active_config(db, workspace_id)
+    api_key = decrypt_key(config.encrypted_api_key)
+    model = config.model_override or default_model_for(config.provider)
+
+    objectives = workspace.objectives_selected or ["market_research"]
+    objectives_list = ", ".join(objectives)
+    guidance_lines = "\n".join(
+        f"- {o}: {_OBJECTIVE_GUIDANCE.get(o, 'relevant observations from the data above.')}" for o in objectives
+    )
+    since_last_time = (
+        f"Previous report's executive summary (for context on what's changed since then):\n{previous_executive_summary}\n\n"
+        if previous_executive_summary
+        else "This is the first report for this workspace — there is no prior report to compare against.\n\n"
+    )
+
+    prompt = _REPORT_NARRATIVE_PROMPT_TEMPLATE.format(
+        business_context="\n".join(_render_business_context(workspace)) or "No business context provided yet.",
+        since_last_time=since_last_time,
+        match_count=len(price_comparison),
+        price_comparison_text=_format_comparison_rows_for_narrative(price_comparison),
+        alerts_text=_format_alerts_for_narrative(alerts),
+        objectives_list=objectives_list,
+        guidance_lines=guidance_lines,
+    )
+
+    if config.provider == "openai":
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key)
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return _extract_json_object(resp.choices[0].message.content)
+
+    if config.provider == "anthropic":
+        from anthropic import AsyncAnthropic
+
+        client = AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model=model,
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(block.text for block in resp.content if block.type == "text")
+        return _extract_json_object(text)
+
+    if config.provider == "google":
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=3)),
+        )
+        resp = await client.aio.models.generate_content(model=model, contents=[prompt])
+        return _extract_json_object(resp.text)
 
     raise ValueError(f"Unknown provider: {config.provider}")

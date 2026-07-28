@@ -257,6 +257,77 @@ export interface TrackedMatch {
   competitor_site_relationship_type: DiscoveryMode;
 }
 
+export interface TrendInfo {
+  previous_price: number;
+  previous_checked_at: string;
+  direction: "up" | "down" | "same";
+  delta_pct: number;
+  is_anomaly: boolean;
+}
+
+export interface PriceComparisonRow {
+  match_id: number;
+  match_method: "manual" | "ai_auto";
+  confidence: number | null;
+  rationale: string | null;
+  product_id: number;
+  product_name: string;
+  product_price: number;
+  product_currency: string;
+  product_min_price: number | null;
+  competitor_product_id: number;
+  competitor_product_title: string;
+  competitor_product_price: number | null;
+  competitor_product_currency: string | null;
+  competitor_product_is_trackable: boolean;
+  competitor_site_id: number;
+  competitor_site_domain: string;
+  competitor_site_name: string | null;
+  competitor_site_relationship_type: DiscoveryMode;
+  same_currency: boolean;
+  price_delta_pct: number | null;
+  below_map: boolean;
+  trend: TrendInfo | null;
+}
+
+export interface AlertItem extends PriceComparisonRow {
+  type: "map_violation" | "price_anomaly";
+  severity: "high" | "medium";
+  message: string;
+}
+
+export interface SummaryStats {
+  matches_tracked: number;
+  alerts_count: number;
+  map_violations_count: number;
+  price_anomalies_count: number;
+  price_increases: number;
+  price_decreases: number;
+  no_price_count: number;
+}
+
+export interface ReportContent {
+  schema_version: number;
+  summary_stats: SummaryStats;
+  price_comparison: PriceComparisonRow[];
+  alerts: AlertItem[];
+  executive_summary: string | null;
+  recommendations: { objective: string; text: string }[];
+}
+
+export interface CompetitorReport {
+  id: number;
+  workspace_id: number;
+  fed_forward_from_report_id: number | null;
+  generated_at: string;
+  trigger_source: "manual" | "scheduled";
+  ai_provider: string;
+  model: string;
+  status: "completed" | "failed";
+  error_message: string | null;
+  content: ReportContent;
+}
+
 export const api = {
   auth: {
     async signup(email: string, password: string, workspaceName: string) {
@@ -369,5 +440,11 @@ export const api = {
       request<ProductMatch>(`/discovery/matches/${matchId}`, { method: "PATCH", body: JSON.stringify({ status }) }),
     listTrackedMatches: (status: ProductMatchStatus = "confirmed") =>
       request<TrackedMatch[]>(`/discovery/matches?status_filter=${status}`),
+  },
+  reporting: {
+    create: () => request<CompetitorReport>("/reporting/reports", { method: "POST" }),
+    list: () => request<CompetitorReport[]>("/reporting/reports"),
+    get: (id: number) => request<CompetitorReport>(`/reporting/reports/${id}`),
+    exportUrl: (id: number) => `/api/v1/reporting/reports/${id}/export.csv`,
   },
 };

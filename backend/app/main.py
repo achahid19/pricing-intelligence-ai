@@ -8,13 +8,17 @@ from app.auth.router import router as auth_router
 from app.catalog.router import router as catalog_router
 from app.config import settings
 from app.discovery.router import router as discovery_router
+from app.reporting.router import router as reporting_router
+from app.reporting.scheduler import start_scheduler, stop_scheduler
 from app.services.storage import UPLOAD_DIR
 from app.workspace.router import router as workspace_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    start_scheduler()
     yield
+    stop_scheduler()
 
 
 app = FastAPI(
@@ -39,6 +43,7 @@ app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(workspace_router, prefix="/api/v1/workspace", tags=["workspace"])
 app.include_router(catalog_router, prefix="/api/v1/products", tags=["catalog"])
 app.include_router(discovery_router, prefix="/api/v1/discovery", tags=["discovery"])
+app.include_router(reporting_router, prefix="/api/v1/reporting", tags=["reporting"])
 
 
 @app.get("/health")

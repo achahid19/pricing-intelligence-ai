@@ -30,7 +30,9 @@ from app.discovery.schemas import (
     TrackedMatchOut,
 )
 from app.db.database import get_db
+from app.discovery.service import fetch_tracked_matches
 from app.services import ai_client
+from app.services.cooldown import check_cooldown
 from app.services.model_catalog import default_model_for
 from app.workspace.models import AiProviderConfig, Workspace
 
@@ -46,15 +48,7 @@ DISCOVERY_COOLDOWN_SECONDS = 30
 
 
 def _check_cooldown(last_at: Optional[datetime]) -> None:
-    if last_at is None:
-        return
-    elapsed = (datetime.now(timezone.utc) - last_at).total_seconds()
-    if elapsed < DISCOVERY_COOLDOWN_SECONDS:
-        wait_seconds = int(DISCOVERY_COOLDOWN_SECONDS - elapsed) + 1
-        raise HTTPException(
-            status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Please wait {wait_seconds}s before running this again.",
-        )
+    check_cooldown(last_at, DISCOVERY_COOLDOWN_SECONDS)
 
 
 _MARKDOWN_CITATION_RE = re.compile(r"\s*\(\[[^\]]+\]\(https?://[^)]+\)\)")
@@ -573,14 +567,7 @@ async def list_tracked_matches(
     this is what a "your catalog vs. every tracked competitor" page reads
     from, so it joins in enough from Product/CompetitorProduct/
     CompetitorSite that the frontend needs no further per-id lookups."""
-    result = await db.execute(
-        select(ProductMatch, Product, CompetitorProduct, CompetitorSite)
-        .join(Product, ProductMatch.product_id == Product.id)
-        .join(CompetitorProduct, ProductMatch.competitor_product_id == CompetitorProduct.id)
-        .join(CompetitorSite, CompetitorProduct.competitor_site_id == CompetitorSite.id)
-        .where(ProductMatch.workspace_id == workspace.id, ProductMatch.status == status_filter)
-        .order_by(Product.name)
-    )
+    rows = await fetch_tracked_matches(db, workspace.id, status_filter)
     return [
         TrackedMatchOut(
             id=match.id,
@@ -605,7 +592,7 @@ async def list_tracked_matches(
             competitor_site_name=site.name,
             competitor_site_relationship_type=site.relationship_type,
         )
-        for match, product, cproduct, site in result.all()
+        for match, product, cproduct, site in rows
     ]
 
 

@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Package, Search, Settings, ShieldCheck, TrendingUp } from "lucide-react";
+import { ArrowRight, FileText, Package, Search, Settings, ShieldCheck, TrendingUp } from "lucide-react";
 
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Card, cardClassName } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
-import { api, type CompetitorSite, type DiscoveryRun, type Product, type TrackedMatch } from "@/lib/api";
+import { api, type CompetitorReport, type CompetitorSite, type DiscoveryRun, type Product, type TrackedMatch } from "@/lib/api";
 
 function StatCard({
   icon: Icon,
@@ -39,6 +39,11 @@ const RUN_STATUS_TONE: Record<string, BadgeTone> = {
   failed: "danger",
 };
 
+const REPORT_STATUS_TONE: Record<string, BadgeTone> = {
+  completed: "good",
+  failed: "danger",
+};
+
 function QuickActionLink({
   href,
   title,
@@ -64,22 +69,25 @@ export default function Home() {
   const [savedSites, setSavedSites] = useState<CompetitorSite[] | null>(null);
   const [runs, setRuns] = useState<DiscoveryRun[] | null>(null);
   const [trackedMatches, setTrackedMatches] = useState<TrackedMatch[] | null>(null);
+  const [reports, setReports] = useState<CompetitorReport[] | null>(null);
 
   useEffect(() => {
     api.products.list().then(setProducts).catch(() => setProducts([]));
     api.discovery.listSites("saved").then(setSavedSites).catch(() => setSavedSites([]));
     api.discovery.listRuns().then(setRuns).catch(() => setRuns([]));
     api.discovery.listTrackedMatches().then(setTrackedMatches).catch(() => setTrackedMatches([]));
+    api.reporting.list().then(setReports).catch(() => setReports([]));
   }, []);
 
   const lastRun = runs?.[0];
   const lastRunDate = lastRun ? new Date(lastRun.triggered_at).toLocaleString() : null;
+  const lastReport = reports?.[0];
 
   return (
     <div className="mx-auto max-w-4xl px-8 py-10">
       <PageHeader title="Welcome back" description="Here's where things stand across your catalog and competitor research." />
 
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard
           icon={Package}
           label="Catalog"
@@ -98,6 +106,9 @@ export default function Home() {
           value={trackedMatches ? String(trackedMatches.length) : "…"}
           hint={trackedMatches && trackedMatches.length === 0 ? "No matches confirmed yet" : "confirmed matches"}
         />
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Card>
           <div className="flex items-center gap-2 text-slate">
             <Search className="size-4" />
@@ -114,6 +125,30 @@ export default function Home() {
             <>
               <p className="mt-2 text-2xl font-semibold text-ink">—</p>
               <p className="mt-1 text-xs text-slate-soft">Never run yet</p>
+            </>
+          )}
+        </Card>
+        <Card>
+          <div className="flex items-center gap-2 text-slate">
+            <FileText className="size-4" />
+            <span className="text-xs font-medium">Last report</span>
+          </div>
+          {lastReport ? (
+            <>
+              <div className="mt-2 flex items-center gap-2">
+                <Badge tone={REPORT_STATUS_TONE[lastReport.status] ?? "neutral"} className="capitalize">
+                  {lastReport.status}
+                </Badge>
+                {lastReport.content.summary_stats.alerts_count > 0 && (
+                  <span className="text-xs text-danger">{lastReport.content.summary_stats.alerts_count} alerts</span>
+                )}
+              </div>
+              <p className="mt-1.5 text-xs text-slate-soft">{new Date(lastReport.generated_at).toLocaleString()}</p>
+            </>
+          ) : (
+            <>
+              <p className="mt-2 text-2xl font-semibold text-ink">—</p>
+              <p className="mt-1 text-xs text-slate-soft">Never generated yet</p>
             </>
           )}
         </Card>
@@ -135,7 +170,7 @@ export default function Home() {
             description="Find real competitors based on your business context and catalog."
           />
         )}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           <Link
             href="/catalog"
             className={cn(cardClassName, "flex items-center gap-2 p-3 text-sm font-medium text-ink transition-colors hover:bg-black/[0.02]")}
@@ -156,6 +191,13 @@ export default function Home() {
           >
             <TrendingUp className="size-4 text-slate-soft" />
             Tracked
+          </Link>
+          <Link
+            href="/reports"
+            className={cn(cardClassName, "flex items-center gap-2 p-3 text-sm font-medium text-ink transition-colors hover:bg-black/[0.02]")}
+          >
+            <FileText className="size-4 text-slate-soft" />
+            Reports
           </Link>
           <Link
             href="/settings"
