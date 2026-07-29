@@ -119,7 +119,9 @@ function OwnProductDropTarget({
         dragOver ? "border-accent bg-accent/5" : "border-border bg-paper-raised"
       )}
     >
-      <p className="truncate text-sm font-medium text-ink">{product.name}</p>
+      <Link href={`/catalog?highlight=${product.id}`} className="block truncate text-sm font-medium text-ink hover:text-accent">
+        {product.name}
+      </Link>
       <p className="text-xs tabular-nums text-slate-soft">
         {product.currency} {product.price}
       </p>

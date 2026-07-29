@@ -116,7 +116,9 @@ export default function TrackedPage() {
           {grouped.map((group) => (
             <Card key={group.productId}>
               <div className="flex items-center justify-between gap-2">
-                <h2 className="font-medium text-ink">{group.name}</h2>
+                <Link href={`/catalog?highlight=${group.productId}`} className="font-medium text-ink hover:text-accent">
+                  {group.name}
+                </Link>
                 <span className="shrink-0 text-sm tabular-nums text-slate-soft">
                   {group.currency} {Number(group.price).toFixed(2)}
                 </span>

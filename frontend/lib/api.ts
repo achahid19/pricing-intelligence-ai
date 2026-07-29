@@ -310,6 +310,7 @@ export interface ProductMetrics {
   price_index: number | null;
   cheapest_competitor_name: string | null;
   cheapest_competitor_price: number | null;
+  cheapest_competitor_site_id: number | null;
 }
 
 export interface ProductComparisonGroup {

@@ -119,7 +119,9 @@ function SiteCoverageCard({ site }: { site: SiteCoverage }) {
   return (
     <Card>
       <div className="flex items-center justify-between gap-2">
-        <span className="font-medium text-ink">{site.competitor_site_name || site.competitor_site_domain}</span>
+        <Link href={`/discovery/${site.competitor_site_id}`} className="font-medium text-ink hover:text-accent">
+          {site.competitor_site_name || site.competitor_site_domain}
+        </Link>
         <Badge tone={site.relationship_type === "reseller" ? "accent" : "neutral"}>{site.relationship_type}</Badge>
       </div>
       <p className="mt-1 text-xs text-slate-soft">
@@ -289,7 +291,15 @@ export default function ReportDetailPage() {
                   <Badge tone={ALERT_TONE[alert.type] ?? "neutral"} className="mt-0.5 shrink-0 capitalize">
                     {alert.type.replace("_", " ")}
                   </Badge>
-                  <p className="text-sm text-ink">{alert.message}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm text-ink">{alert.message}</p>
+                    <Link
+                      href={`/discovery/${alert.competitor_site_id}`}
+                      className="mt-1 inline-block text-xs font-medium text-accent hover:underline"
+                    >
+                      View {alert.competitor_site_name || alert.competitor_site_domain} →
+                    </Link>
+                  </div>
                 </Card>
               ))}
             </div>
@@ -347,7 +357,9 @@ export default function ReportDetailPage() {
               {report.content.price_comparison.map((group) => (
                 <tr key={group.product_id} className="border-b border-border align-top last:border-0">
                   <td className="px-3 py-3">
-                    <div className="font-medium text-ink">{group.product_name}</div>
+                    <Link href={`/catalog?highlight=${group.product_id}`} className="font-medium text-ink hover:text-accent">
+                      {group.product_name}
+                    </Link>
                     <div className="text-xs tabular-nums text-slate-soft">
                       {group.product_currency} {group.product_price.toFixed(2)}
                     </div>
@@ -358,7 +370,16 @@ export default function ReportDetailPage() {
                   <td className="px-3 py-3">
                     {group.metrics.cheapest_competitor_name ? (
                       <>
-                        <div className="text-ink">{group.metrics.cheapest_competitor_name}</div>
+                        {group.metrics.cheapest_competitor_site_id ? (
+                          <Link
+                            href={`/discovery/${group.metrics.cheapest_competitor_site_id}`}
+                            className="text-ink hover:text-accent"
+                          >
+                            {group.metrics.cheapest_competitor_name}
+                          </Link>
+                        ) : (
+                          <div className="text-ink">{group.metrics.cheapest_competitor_name}</div>
+                        )}
                         <div className="text-xs tabular-nums text-slate-soft">
                           {group.metrics.cheapest_competitor_price?.toFixed(2)}
                         </div>

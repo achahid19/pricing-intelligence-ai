@@ -65,6 +65,7 @@ class ProductMetrics(BaseModel):
     price_index: Optional[float]
     cheapest_competitor_name: Optional[str]
     cheapest_competitor_price: Optional[float]
+    cheapest_competitor_site_id: Optional[int] = None
 
 
 class ProductComparisonGroup(BaseModel):

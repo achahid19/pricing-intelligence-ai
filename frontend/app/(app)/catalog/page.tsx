@@ -31,6 +31,7 @@ export default function CatalogPage() {
   const [sortKey, setSortKey] = useState<SortKey>("category");
   const [confirmingDelete, setConfirmingDelete] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [highlightId, setHighlightId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     api.products
@@ -41,7 +42,22 @@ export default function CatalogPage() {
 
   useEffect(() => {
     load();
+    // Plain window.location read (not useSearchParams) so this page never
+    // needs a Suspense boundary — a one-time read at mount is all a deep
+    // link needs, no reactivity to later client-side query changes.
+    const id = Number(new URLSearchParams(window.location.search).get("highlight"));
+    if (id) setHighlightId(id);
   }, [load]);
+
+  // Scroll the linked-to row into view once it's actually rendered, then
+  // fade the highlight after a few seconds instead of leaving it stuck on.
+  useEffect(() => {
+    if (!highlightId || !products) return;
+    const row = document.getElementById(`product-${highlightId}`);
+    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = setTimeout(() => setHighlightId(null), 2500);
+    return () => clearTimeout(timer);
+  }, [highlightId, products]);
 
   const categories = useMemo(() => {
     if (!products) return [];
@@ -180,7 +196,14 @@ export default function CatalogPage() {
             </thead>
             <tbody>
               {visibleProducts.map((p) => (
-                <tr key={p.id} className="border-b border-border last:border-0 hover:bg-black/[0.015]">
+                <tr
+                  key={p.id}
+                  id={`product-${p.id}`}
+                  className={cn(
+                    "border-b border-border transition-colors last:border-0 hover:bg-black/[0.015]",
+                    highlightId === p.id && "bg-accent/10 hover:bg-accent/10"
+                  )}
+                >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       {p.image_url ? (

@@ -109,7 +109,7 @@ export default function Home() {
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Card>
+        <Link href="/discovery" className={cn(cardClassName, "block transition-colors hover:bg-black/[0.02]")}>
           <div className="flex items-center gap-2 text-slate">
             <Search className="size-4" />
             <span className="text-xs font-medium">Last discovery run</span>
@@ -127,8 +127,11 @@ export default function Home() {
               <p className="mt-1 text-xs text-slate-soft">Never run yet</p>
             </>
           )}
-        </Card>
-        <Card>
+        </Link>
+        <Link
+          href={lastReport ? `/reports/${lastReport.id}` : "/reports"}
+          className={cn(cardClassName, "block transition-colors hover:bg-black/[0.02]")}
+        >
           <div className="flex items-center gap-2 text-slate">
             <FileText className="size-4" />
             <span className="text-xs font-medium">Last report</span>
@@ -151,7 +154,7 @@ export default function Home() {
               <p className="mt-1 text-xs text-slate-soft">Never generated yet</p>
             </>
           )}
-        </Card>
+        </Link>
       </div>
 
       <div className="mt-8 space-y-2">

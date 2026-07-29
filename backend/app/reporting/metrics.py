@@ -28,6 +28,7 @@ def build_comparison_metrics(product_price: float, matches: list[dict]) -> dict:
             "price_index": None,
             "cheapest_competitor_name": None,
             "cheapest_competitor_price": None,
+            "cheapest_competitor_site_id": None,
         }
 
     prices = [m["competitor_product_price"] for m in same_currency_priced]
@@ -49,6 +50,7 @@ def build_comparison_metrics(product_price: float, matches: list[dict]) -> dict:
         "price_index": price_index,
         "cheapest_competitor_name": cheapest["competitor_site_name"] or cheapest["competitor_site_domain"],
         "cheapest_competitor_price": cheapest["competitor_product_price"],
+        "cheapest_competitor_site_id": cheapest["competitor_site_id"],
     }
 
 
