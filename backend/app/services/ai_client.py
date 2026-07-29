@@ -665,6 +665,8 @@ def _format_comparison_groups_for_narrative(groups: list[dict]) -> str:
                     comp += " — different currency, not directly comparable"
             else:
                 comp = f'  vs {competitor_label}\'s "{r["competitor_product_title"]}" (no price found)'
+            if r.get("competitor_product_stock_status"):
+                comp += f' [stock: "{r["competitor_product_stock_status"]}"]'
             lines.append(comp)
     return "\n".join(lines) if lines else "(no tracked matches yet)"
 

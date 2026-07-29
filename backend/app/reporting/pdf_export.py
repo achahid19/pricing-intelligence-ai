@@ -49,6 +49,7 @@ _ALERT_LABELS = {
     "price_anomaly": "Price anomaly",
     "new_competitor_product": "New competitor product",
     "own_price_change": "Own price change",
+    "stock_status_change": "Stock status change",
 }
 
 _PAGE_MARGIN = 2 * cm
@@ -147,7 +148,14 @@ def _kpi_row(stats: dict, s: dict, content_width: float) -> Table:
 
 
 def _alerts_breakdown(alerts: list[dict], s: dict) -> str:
-    counts = {"map_violation": 0, "price_anomaly_up": 0, "price_anomaly_down": 0, "new_competitor_product": 0, "own_price_change": 0}
+    counts = {
+        "map_violation": 0,
+        "price_anomaly_up": 0,
+        "price_anomaly_down": 0,
+        "new_competitor_product": 0,
+        "own_price_change": 0,
+        "stock_status_change": 0,
+    }
     new_product_total = 0
     for a in alerts:
         if a["type"] == "map_violation":
@@ -163,10 +171,12 @@ def _alerts_breakdown(alerts: list[dict], s: dict) -> str:
             new_product_total += a.get("new_product_count") or 0
         elif a["type"] == "own_price_change":
             counts["own_price_change"] += 1
+        elif a["type"] == "stock_status_change":
+            counts["stock_status_change"] += 1
     return (
         f"{counts['map_violation']} MAP violations &middot; {counts['price_anomaly_up']} price jumps &middot; "
         f"{counts['price_anomaly_down']} price drops &middot; {new_product_total} new competitor products &middot; "
-        f"{counts['own_price_change']} own price changes"
+        f"{counts['own_price_change']} own price changes &middot; {counts['stock_status_change']} stock status changes"
     )
 
 

@@ -27,6 +27,10 @@ class PriceComparisonRow(BaseModel):
     competitor_product_price: Optional[float]
     competitor_product_currency: Optional[str]
     competitor_product_is_trackable: bool
+    # Free-text, AI-observed (see discovery/models.py's CompetitorProduct.
+    # stock_status docstring) — ambient display only, never null-checked
+    # for a "trackable" determination the way price/currency are.
+    competitor_product_stock_status: Optional[str] = None
     competitor_site_id: int
     competitor_site_domain: str
     competitor_site_name: Optional[str]
@@ -48,7 +52,9 @@ class AlertItem(BaseModel):
     domain/name are null for that type, which is why they're optional
     here rather than always-present like the earlier alert-only design."""
 
-    type: Literal["map_violation", "price_anomaly", "new_competitor_product", "own_price_change"]
+    type: Literal[
+        "map_violation", "price_anomaly", "new_competitor_product", "own_price_change", "stock_status_change"
+    ]
     severity: Literal["high", "medium"]
     message: str
 
@@ -87,6 +93,11 @@ class AlertItem(BaseModel):
     # new_competitor_product only
     new_product_count: Optional[int] = None
     new_product_titles: Optional[list[str]] = None
+
+    # stock_status_change only — free-text, whatever the discovery AI
+    # observed on the page each time, not a fixed vocabulary.
+    previous_stock_status: Optional[str] = None
+    current_stock_status: Optional[str] = None
 
 
 class ProductMetrics(BaseModel):

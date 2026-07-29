@@ -280,6 +280,8 @@ export interface PriceComparisonRow {
   competitor_product_price: number | null;
   competitor_product_currency: string | null;
   competitor_product_is_trackable: boolean;
+  // Free-text, AI-observed — ambient display only, no fixed vocabulary.
+  competitor_product_stock_status: string | null;
   competitor_site_id: number;
   competitor_site_domain: string;
   competitor_site_name: string | null;
@@ -298,7 +300,7 @@ export interface PriceComparisonRow {
 // no competitor involved at all — competitor_site_id/domain/name are null
 // for that type, which is why they're optional here.
 export interface AlertItem {
-  type: "map_violation" | "price_anomaly" | "new_competitor_product" | "own_price_change";
+  type: "map_violation" | "price_anomaly" | "new_competitor_product" | "own_price_change" | "stock_status_change";
   severity: "high" | "medium";
   message: string;
   competitor_site_id?: number | null;
@@ -327,6 +329,10 @@ export interface AlertItem {
 
   new_product_count?: number | null;
   new_product_titles?: string[] | null;
+
+  // stock_status_change only
+  previous_stock_status?: string | null;
+  current_stock_status?: string | null;
 }
 
 // Same-currency-gated comparison metrics for one product (see

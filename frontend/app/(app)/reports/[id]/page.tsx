@@ -48,6 +48,7 @@ const ALERT_TONE: Record<string, BadgeTone> = {
   price_anomaly: "accent",
   new_competitor_product: "accent",
   own_price_change: "accent",
+  stock_status_change: "accent",
 };
 
 const STATUS_TONE: Record<string, BadgeTone> = {
@@ -141,11 +142,15 @@ function TrendIndicator({ trend }: { trend: TrendInfo | null | undefined }) {
 function MatchPill({ row }: { row: PriceComparisonRow }) {
   const delta = row.same_currency && row.price_delta_pct != null ? priceDeltaFromPct(row.price_delta_pct) : null;
   const priceColor = delta ? (delta.tone === "good" ? "text-good" : delta.tone === "danger" ? "text-danger" : "text-slate-soft") : "text-slate-soft";
+  const titleParts = [
+    delta ? delta.label : row.same_currency ? null : "Different currency — not directly comparable",
+    row.competitor_product_stock_status ? `Stock: ${row.competitor_product_stock_status}` : null,
+  ].filter(Boolean);
 
   return (
     <Link
       href={`/discovery/${row.competitor_site_id}`}
-      title={delta ? delta.label : row.same_currency ? undefined : "Different currency — not directly comparable"}
+      title={titleParts.length > 0 ? titleParts.join(" · ") : undefined}
       className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs hover:border-accent"
     >
       <span className="font-medium text-ink">{row.competitor_site_name || row.competitor_site_domain}</span>
@@ -306,6 +311,7 @@ export default function ReportDetailPage() {
     .filter((a) => a.type === "new_competitor_product")
     .reduce((sum, a) => sum + (a.new_product_count ?? 0), 0);
   const ownPriceChanges = report.content.alerts.filter((a) => a.type === "own_price_change").length;
+  const stockStatusChanges = report.content.alerts.filter((a) => a.type === "stock_status_change").length;
 
   const tabs: Array<[TabKey, string, number | undefined]> = [
     ["overview", "Overview", undefined],
@@ -515,6 +521,9 @@ export default function ReportDetailPage() {
           <Badge tone={ownPriceChanges > 0 ? "accent" : "neutral"}>
             {ownPriceChanges} own price change{ownPriceChanges === 1 ? "" : "s"}
           </Badge>
+          <Badge tone={stockStatusChanges > 0 ? "accent" : "neutral"}>
+            {stockStatusChanges} stock status change{stockStatusChanges === 1 ? "" : "s"}
+          </Badge>
         </div>
 
         {report.content.alerts.length > 0 ? (
@@ -570,6 +579,10 @@ export default function ReportDetailPage() {
               <li>
                 <span className="font-medium text-ink">Own price change</span> — one of your own product's
                 prices moves by 15% or more since your previous report.
+              </li>
+              <li>
+                <span className="font-medium text-ink">Stock status change</span> — a tracked competitor's product
+                goes from in stock to out of stock, or back, since your previous report.
               </li>
             </ul>
           </Card>

@@ -150,6 +150,64 @@ async def _compute_own_trend(
     }
 
 
+# stock_status is free-text (AI-observed from whatever the page showed —
+# see discovery/models.py's CompetitorProduct.stock_status docstring), not
+# a fixed vocabulary, so a genuine in-stock <-> out-of-stock flip can't be
+# detected by exact-string comparison. This is a small, fixed keyword
+# classifier (plain Python, not an AI call) — still deterministic per
+# CLAUDE.md's rule, it just tolerates the AI's own wording variance from
+# the discovery call that originally wrote the text.
+_OUT_OF_STOCK_KEYWORDS = ("out of stock", "out-of-stock", "sold out", "unavailable", "not available", "backorder", "discontinued")
+_IN_STOCK_KEYWORDS = ("in stock", "in-stock", "available", "ready to ship")
+
+
+def _classify_stock_status(text: Optional[str]) -> str:
+    if not text:
+        return "unknown"
+    lowered = text.lower()
+    if any(k in lowered for k in _OUT_OF_STOCK_KEYWORDS):
+        return "out_of_stock"
+    if any(k in lowered for k in _IN_STOCK_KEYWORDS):
+        return "in_stock"
+    return "unknown"
+
+
+async def _compute_stock_change(
+    db: AsyncSession,
+    competitor_product_id: int,
+    previous_report: Optional[CompetitorReport],
+    current_stock_status: Optional[str],
+) -> Optional[dict]:
+    """Same snapshot-lookup shape as _compute_trend, but for stock_status
+    text. Only returns non-None on a genuine in_stock <-> out_of_stock
+    flip — "unknown" on either side (no stock note observed, or wording
+    the classifier can't place) never fires an alert, since there's
+    nothing reliable to compare."""
+    if previous_report is None:
+        return None
+    result = await db.execute(
+        select(CompetitorProductSnapshot)
+        .where(
+            CompetitorProductSnapshot.competitor_product_id == competitor_product_id,
+            CompetitorProductSnapshot.checked_at <= previous_report.generated_at,
+        )
+        .order_by(CompetitorProductSnapshot.checked_at.desc())
+        .limit(1)
+    )
+    snapshot = result.scalars().first()
+    if snapshot is None:
+        return None
+    previous_state = _classify_stock_status(snapshot.stock_status)
+    current_state = _classify_stock_status(current_stock_status)
+    if previous_state == current_state or "unknown" in (previous_state, current_state):
+        return None
+    return {
+        "previous_stock_status": snapshot.stock_status,
+        "current_stock_status": current_stock_status,
+        "went_out_of_stock": current_state == "out_of_stock",
+    }
+
+
 async def _build_own_price_alerts(db: AsyncSession, workspace_id: int, previous_report: Optional[CompetitorReport]) -> list[dict]:
     """Deterministic — one alert per own Product whose price has moved by
     at least PRICE_ANOMALY_THRESHOLD_PCT since the previous report (same
@@ -186,7 +244,9 @@ async def _build_own_price_alerts(db: AsyncSession, workspace_id: int, previous_
     return alerts
 
 
-def _compute_comparison_row(match, product, cproduct, site, trend: Optional[dict], own_trend: Optional[dict]) -> dict:
+def _compute_comparison_row(
+    match, product, cproduct, site, trend: Optional[dict], own_trend: Optional[dict], stock_change: Optional[dict]
+) -> dict:
     """Ports the exact same-currency-gated price-delta and MAP-violation
     determination frontend/app/(app)/tracked/page.tsx's priceDelta()/
     belowMap compute client-side — this is now the single Python source of
@@ -225,6 +285,7 @@ def _compute_comparison_row(match, product, cproduct, site, trend: Optional[dict
         "competitor_product_price": competitor_price,
         "competitor_product_currency": cproduct.currency,
         "competitor_product_is_trackable": cproduct.is_trackable,
+        "competitor_product_stock_status": cproduct.stock_status,
         "competitor_site_id": site.id,
         "competitor_site_domain": site.domain,
         "competitor_site_name": site.name,
@@ -234,6 +295,7 @@ def _compute_comparison_row(match, product, cproduct, site, trend: Optional[dict
         "below_map": below_map,
         "trend": trend,
         "own_trend": own_trend,
+        "stock_change": stock_change,
     }
 
 
@@ -270,6 +332,24 @@ def _build_alerts(rows: list[dict]) -> list[dict]:
                         f"{abs(trend['delta_pct']):.0f}% since the last report."
                     ),
                     **row,
+                }
+            )
+        stock_change = row.get("stock_change")
+        if stock_change:
+            direction_word = "went out of stock" if stock_change["went_out_of_stock"] else "is back in stock"
+            alerts.append(
+                {
+                    "type": "stock_status_change",
+                    "severity": "medium",
+                    "message": (
+                        f"{row['competitor_site_name'] or row['competitor_site_domain']}'s "
+                        f"\"{row['competitor_product_title']}\" {direction_word} since the last report "
+                        f"(was \"{stock_change['previous_stock_status']}\", now "
+                        f"\"{stock_change['current_stock_status']}\")."
+                    ),
+                    **row,
+                    "previous_stock_status": stock_change["previous_stock_status"],
+                    "current_stock_status": stock_change["current_stock_status"],
                 }
             )
     return alerts
@@ -345,7 +425,8 @@ async def generate_report(db: AsyncSession, workspace: Workspace, trigger_source
         competitor_price = float(cproduct.price) if cproduct.price is not None else None
         trend = await _compute_trend(db, cproduct.id, previous_report, competitor_price)
         own_trend = await _compute_own_trend(db, product.id, previous_report, float(product.price))
-        flat_rows.append(_compute_comparison_row(match, product, cproduct, site, trend, own_trend))
+        stock_change = await _compute_stock_change(db, cproduct.id, previous_report, cproduct.stock_status)
+        flat_rows.append(_compute_comparison_row(match, product, cproduct, site, trend, own_trend, stock_change))
 
     alerts = _build_alerts(flat_rows)
     # No previous report means no "since when" baseline — a first report
