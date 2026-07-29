@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, ExternalLink, Package, Plus, Search, Sparkles, X } from "lucide-react";
 
@@ -13,7 +13,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { api, ApiError, type CompetitorSite, type DiscoveryMode, type DiscoveryRun } from "@/lib/api";
+import { usePersistedTab } from "@/lib/usePersistedTab";
 import { cn } from "@/lib/utils";
+
+const DISCOVERY_MODES = ["competitor", "reseller"] as const;
+const SITE_VIEWS = ["candidates", "saved", "dismissed"] as const;
 
 const SITE_CONFIDENCE_TOOLTIP =
   "The AI's own self-assessed confidence based on what it found during research — not a verified or independently calibrated metric.";
@@ -177,9 +181,15 @@ function AddCompetitorForm({ onAdded, relationshipType }: { onAdded: () => void;
 type SiteView = "candidates" | "saved" | "dismissed";
 
 export default function DiscoveryPage() {
-  const [mode, setMode] = useState<DiscoveryMode>("competitor");
-  const [view, setView] = useState<SiteView>("candidates");
+  const [mode, setMode] = usePersistedTab<DiscoveryMode>("mode", "discovery-mode", DISCOVERY_MODES, "competitor");
+  const [view, setView] = usePersistedTab<SiteView>("view", "discovery-view", SITE_VIEWS, "candidates");
   const [showResellerMode, setShowResellerMode] = useState(false);
+  // Tracks the mode last seen by the reset-on-mode-change effect below —
+  // a value comparison, not a boolean "have I run yet" latch, since React
+  // Strict Mode double-invokes effects on mount in development and would
+  // flip a plain latch on the harmless synthetic second call, incorrectly
+  // treating it as a genuine mode change and stomping a restored view.
+  const prevModeRef = useRef(mode);
   const [runs, setRuns] = useState<DiscoveryRun[] | null>(null);
   const [candidates, setCandidates] = useState<CompetitorSite[] | null>(null);
   const [savedSites, setSavedSites] = useState<CompetitorSite[] | null>(null);
@@ -199,8 +209,15 @@ export default function DiscoveryPage() {
   useEffect(() => {
     api.workspace
       .me()
-      .then((ws) => setShowResellerMode((ws.objectives_selected ?? []).includes("map_compliance")))
+      .then((ws) => {
+        const canUseResellerMode = (ws.objectives_selected ?? []).includes("map_compliance");
+        setShowResellerMode(canUseResellerMode);
+        // A persisted reseller mode from a previous session shouldn't get
+        // stuck active if the workspace's objectives no longer allow it.
+        if (!canUseResellerMode && mode === "reseller") setMode("competitor");
+      })
       .catch(() => setShowResellerMode(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const load = useCallback(() => {
@@ -213,10 +230,16 @@ export default function DiscoveryPage() {
   }, [mode]);
 
   useEffect(() => {
-    setSelectedIds(new Set());
-    setView("candidates");
+    // Only reset to Candidates when mode has actually changed since the
+    // last time this ran — leaves a persisted/URL-restored view alone on
+    // mount, while still resetting on a genuine user-driven mode switch.
+    if (prevModeRef.current !== mode) {
+      prevModeRef.current = mode;
+      setSelectedIds(new Set());
+      setView("candidates");
+    }
     load();
-  }, [load]);
+  }, [load, mode]);
 
   async function handleRun() {
     setError(null);

@@ -30,6 +30,7 @@ import {
   type SiteCoverage,
 } from "@/lib/api";
 import { priceDeltaFromPct } from "@/lib/pricing";
+import { usePersistedTab } from "@/lib/usePersistedTab";
 import { cn } from "@/lib/utils";
 
 const ALERT_TONE: Record<string, BadgeTone> = {
@@ -162,6 +163,7 @@ function SectionCard({
 }
 
 type TabKey = "overview" | "comparison" | "coverage";
+const TAB_OPTIONS = ["overview", "comparison", "coverage"] as const;
 
 export default function ReportDetailPage() {
   const params = useParams<{ id: string }>();
@@ -169,7 +171,7 @@ export default function ReportDetailPage() {
 
   const [report, setReport] = useState<CompetitorReport | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [tab, setTab] = useState<TabKey>("overview");
+  const [tab, setTab] = usePersistedTab<TabKey>("tab", `report-tab-${reportId}`, TAB_OPTIONS, "overview");
 
   useEffect(() => {
     api.reporting.get(reportId).then(setReport).catch(() => setNotFound(true));
@@ -204,6 +206,10 @@ export default function ReportDetailPage() {
   if (hasCoverage) {
     tabs.push(["coverage", "Market coverage", report.content.market_coverage.sites.length]);
   }
+  // A persisted/URL "coverage" tab can point at a report that turns out to
+  // have none — fall back for rendering rather than getting stuck with
+  // every panel hidden (no useEffect needed, self-corrects every render).
+  const effectiveTab: TabKey = tab === "coverage" && !hasCoverage ? "overview" : tab;
 
   return (
     <div className="mx-auto max-w-6xl px-8 py-10">
@@ -269,7 +275,7 @@ export default function ReportDetailPage() {
             onClick={() => setTab(key)}
             className={cn(
               "border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-              tab === key ? "border-accent text-ink" : "border-transparent text-slate-soft hover:text-ink"
+              effectiveTab === key ? "border-accent text-ink" : "border-transparent text-slate-soft hover:text-ink"
             )}
           >
             {label}
@@ -278,7 +284,7 @@ export default function ReportDetailPage() {
         ))}
       </div>
 
-      <div className={cn("tab-panel mt-6 space-y-4", tab !== "overview" && "hidden")}>
+      <div className={cn("tab-panel mt-6 space-y-4", effectiveTab !== "overview" && "hidden")}>
         {report.content.alerts.length > 0 && (
           <div>
             <h2 className="mb-2 flex items-center gap-2 text-sm font-medium text-ink">
@@ -342,7 +348,7 @@ export default function ReportDetailPage() {
         )}
       </div>
 
-      <div className={cn("tab-panel mt-6", tab !== "comparison" && "hidden")}>
+      <div className={cn("tab-panel mt-6", effectiveTab !== "comparison" && "hidden")}>
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="border-b border-border bg-black/[0.02] text-left text-xs font-medium uppercase tracking-wide text-slate-soft">
@@ -403,7 +409,7 @@ export default function ReportDetailPage() {
       </div>
 
       {hasCoverage && (
-        <div className={cn("tab-panel mt-6", tab !== "coverage" && "hidden")}>
+        <div className={cn("tab-panel mt-6", effectiveTab !== "coverage" && "hidden")}>
           {report.content.competitive_gaps && (
             <p className="mb-4 text-sm leading-relaxed text-slate">{report.content.competitive_gaps}</p>
           )}

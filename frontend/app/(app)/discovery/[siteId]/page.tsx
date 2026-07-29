@@ -21,10 +21,13 @@ import {
   type Product,
   type ProductMatch,
 } from "@/lib/api";
+import { usePersistedTab } from "@/lib/usePersistedTab";
 import { cn } from "@/lib/utils";
 
 const MATCH_CONFIDENCE_TOOLTIP =
   "The AI's own self-assessed confidence that these are genuinely the same or a directly comparable item — not a verified metric.";
+
+const PRODUCT_VIEWS = ["products", "auto-match", "manual"] as const;
 
 function MatchCandidateCard({
   match,
@@ -169,7 +172,7 @@ export default function CompetitorProductsPage() {
   const params = useParams<{ siteId: string }>();
   const siteId = Number(params.siteId);
 
-  const [view, setView] = useState<ProductView>("products");
+  const [view, setView] = usePersistedTab<ProductView>("tab", `discovery-site-tab-${siteId}`, PRODUCT_VIEWS, "products");
   const [site, setSite] = useState<CompetitorSite | null>(null);
   const [products, setProducts] = useState<CompetitorProduct[] | null>(null);
   const [ownProducts, setOwnProducts] = useState<Product[] | null>(null);
