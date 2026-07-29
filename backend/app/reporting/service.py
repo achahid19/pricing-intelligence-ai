@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.discovery.models import CompetitorProductSnapshot
-from app.discovery.service import fetch_market_coverage, fetch_tracked_matches
+from app.discovery.service import fetch_market_coverage, fetch_new_competitor_products, fetch_tracked_matches
 from app.reporting.metrics import group_comparison_rows
 from app.reporting.models import CompetitorReport
 from app.services import ai_client
@@ -198,6 +198,34 @@ def _build_alerts(rows: list[dict]) -> list[dict]:
     return alerts
 
 
+def _build_new_product_alerts(new_products: list[dict]) -> list[dict]:
+    """Pure, deterministic — no AI call, same reasoning as _build_alerts.
+    One alert per competitor site with genuinely new products since the
+    previous report (discovery/service.py.fetch_new_competitor_products
+    already excludes a site's very first discovery from counting as
+    "new")."""
+    alerts = []
+    for site in new_products:
+        count = site["new_product_count"]
+        sample = ", ".join(f'"{t}"' for t in site["new_product_titles"][:5])
+        alerts.append(
+            {
+                "type": "new_competitor_product",
+                "severity": "medium",
+                "message": (
+                    f"{site['competitor_site_name'] or site['competitor_site_domain']} added {count} new "
+                    f"product{'s' if count != 1 else ''} since your last report, including {sample}."
+                ),
+                "competitor_site_id": site["competitor_site_id"],
+                "competitor_site_domain": site["competitor_site_domain"],
+                "competitor_site_name": site["competitor_site_name"],
+                "new_product_count": count,
+                "new_product_titles": site["new_product_titles"],
+            }
+        )
+    return alerts
+
+
 def _build_summary_stats(rows: list[dict], alerts: list[dict]) -> dict:
     """price_increases/price_decreases must come from `trend` (a
     competitor's own price now vs. its CompetitorProductSnapshot at the
@@ -242,6 +270,12 @@ async def generate_report(db: AsyncSession, workspace: Workspace, trigger_source
         flat_rows.append(_compute_comparison_row(match, product, cproduct, site, trend))
 
     alerts = _build_alerts(flat_rows)
+    # No previous report means no "since when" baseline — a first report
+    # correctly has nothing to flag as new yet (same reasoning as trend
+    # being null throughout on a first report).
+    if previous_report is not None:
+        new_products = await fetch_new_competitor_products(db, workspace.id, previous_report.generated_at)
+        alerts += _build_new_product_alerts(new_products)
     summary_stats = _build_summary_stats(flat_rows, alerts)
     price_comparison = group_comparison_rows(flat_rows)
 

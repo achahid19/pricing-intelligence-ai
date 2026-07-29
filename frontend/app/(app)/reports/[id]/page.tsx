@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils";
 const ALERT_TONE: Record<string, BadgeTone> = {
   map_violation: "danger",
   price_anomaly: "accent",
+  new_competitor_product: "accent",
 };
 
 const STATUS_TONE: Record<string, BadgeTone> = {
@@ -208,8 +209,8 @@ function SectionCard({
   );
 }
 
-type TabKey = "overview" | "comparison" | "coverage";
-const TAB_OPTIONS = ["overview", "comparison", "coverage"] as const;
+type TabKey = "overview" | "alerts" | "comparison" | "coverage";
+const TAB_OPTIONS = ["overview", "alerts", "comparison", "coverage"] as const;
 
 export default function ReportDetailPage() {
   const params = useParams<{ id: string }>();
@@ -260,8 +261,19 @@ export default function ReportDetailPage() {
   const stats = report.content.summary_stats;
   const hasCoverage = Boolean(report.content.competitive_gaps) || report.content.market_coverage.sites.length > 0;
 
+  // A breakdown by alert type — map_violations_count is already computed
+  // server-side; the anomaly split by direction is derived here from data
+  // already on each alert (no backend change needed) since "price
+  // anomaly" alone doesn't say whether it jumped or dropped.
+  const priceJumped = report.content.alerts.filter((a) => a.type === "price_anomaly" && a.trend?.direction === "up").length;
+  const priceDropped = report.content.alerts.filter((a) => a.type === "price_anomaly" && a.trend?.direction === "down").length;
+  const newCompetitorProducts = report.content.alerts
+    .filter((a) => a.type === "new_competitor_product")
+    .reduce((sum, a) => sum + (a.new_product_count ?? 0), 0);
+
   const tabs: Array<[TabKey, string, number | undefined]> = [
     ["overview", "Overview", undefined],
+    ["alerts", "Alerts", report.content.alerts.length],
     ["comparison", "Price comparison", report.content.price_comparison.length],
   ];
   if (hasCoverage) {
@@ -380,33 +392,6 @@ export default function ReportDetailPage() {
       </div>
 
       <div className={cn("tab-panel mt-6 space-y-4", effectiveTab !== "overview" && "hidden")}>
-        {report.content.alerts.length > 0 && (
-          <div>
-            <h2 className="mb-2 flex items-center gap-2 text-sm font-medium text-ink">
-              <AlertTriangle className="size-4 text-danger" />
-              Alerts ({report.content.alerts.length})
-            </h2>
-            <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-              {report.content.alerts.map((alert) => (
-                <Card key={`${alert.type}-${alert.match_id}`} className="flex items-start gap-2">
-                  <Badge tone={ALERT_TONE[alert.type] ?? "neutral"} className="mt-0.5 shrink-0 capitalize">
-                    {alert.type.replace("_", " ")}
-                  </Badge>
-                  <div className="min-w-0">
-                    <p className="text-sm text-ink">{alert.message}</p>
-                    <Link
-                      href={`/discovery/${alert.competitor_site_id}`}
-                      className="mt-1 inline-block text-xs font-medium text-accent hover:underline"
-                    >
-                      View {alert.competitor_site_name || alert.competitor_site_domain} →
-                    </Link>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
-
         {report.content.executive_summary && (
           <SectionCard icon={FileText} title="Executive summary">
             {report.content.executive_summary}
@@ -434,6 +419,63 @@ export default function ReportDetailPage() {
               ))}
             </div>
           </div>
+        )}
+      </div>
+
+      <div className={cn("tab-panel mt-6 space-y-4", effectiveTab !== "alerts" && "hidden")}>
+        <div className="flex flex-wrap gap-2">
+          <Badge tone={stats.map_violations_count > 0 ? "danger" : "neutral"}>
+            {stats.map_violations_count} MAP violation{stats.map_violations_count === 1 ? "" : "s"}
+          </Badge>
+          <Badge tone={priceJumped > 0 ? "accent" : "neutral"}>
+            {priceJumped} price jump{priceJumped === 1 ? "" : "s"}
+          </Badge>
+          <Badge tone={priceDropped > 0 ? "accent" : "neutral"}>
+            {priceDropped} price drop{priceDropped === 1 ? "" : "s"}
+          </Badge>
+          <Badge tone={newCompetitorProducts > 0 ? "accent" : "neutral"}>
+            {newCompetitorProducts} new competitor product{newCompetitorProducts === 1 ? "" : "s"}
+          </Badge>
+        </div>
+
+        {report.content.alerts.length > 0 ? (
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+            {report.content.alerts.map((alert) => (
+              <Card key={`${alert.type}-${alert.match_id ?? alert.competitor_site_id}`} className="flex items-start gap-2">
+                <Badge tone={ALERT_TONE[alert.type] ?? "neutral"} className="mt-0.5 shrink-0 capitalize">
+                  {alert.type.replaceAll("_", " ")}
+                </Badge>
+                <div className="min-w-0">
+                  <p className="text-sm text-ink">{alert.message}</p>
+                  <Link
+                    href={`/discovery/${alert.competitor_site_id}`}
+                    className="mt-1 inline-block text-xs font-medium text-accent hover:underline"
+                  >
+                    View {alert.competitor_site_name || alert.competitor_site_domain} →
+                  </Link>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <Card className="text-sm text-slate">
+            <p className="font-medium text-ink">No alerts this period.</p>
+            <p className="mt-2">An alert appears here when:</p>
+            <ul className="mt-1 list-disc space-y-1 pl-5">
+              <li>
+                <span className="font-medium text-ink">MAP violation</span> — a reseller advertises one of your
+                products below the minimum price you've set for it.
+              </li>
+              <li>
+                <span className="font-medium text-ink">Price anomaly</span> — a tracked competitor's price for a
+                matched product moves by 15% or more since your previous report.
+              </li>
+              <li>
+                <span className="font-medium text-ink">New competitor product</span> — a saved competitor's
+                catalog gains products it didn't have at your previous report.
+              </li>
+            </ul>
+          </Card>
         )}
       </div>
 

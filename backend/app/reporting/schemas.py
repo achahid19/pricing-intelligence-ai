@@ -37,14 +37,47 @@ class PriceComparisonRow(BaseModel):
     trend: Optional[TrendInfo]
 
 
-class AlertItem(PriceComparisonRow):
-    """Every field a PriceComparisonRow has, plus the alert-specific ones —
-    an alert is always about a specific row, so it carries the row's full
-    context rather than a bare match_id the frontend would have to look up."""
+class AlertItem(BaseModel):
+    """Not every alert is about one specific confirmed match: map_violation
+    and price_anomaly are (all PriceComparisonRow fields below are set,
+    same full row context as before so the frontend never has to look
+    anything up); new_competitor_product is scoped to a competitor SITE's
+    whole catalog instead — none of your own products are involved at all,
+    so those fields stay null and new_product_count/new_product_titles are
+    set instead. competitor_site_id/domain/name are the one thing every
+    alert type always has, since every alert is about some competitor."""
 
-    type: Literal["map_violation", "price_anomaly"]
+    type: Literal["map_violation", "price_anomaly", "new_competitor_product"]
     severity: Literal["high", "medium"]
     message: str
+    competitor_site_id: int
+    competitor_site_domain: str
+    competitor_site_name: Optional[str]
+
+    # map_violation / price_anomaly only
+    match_id: Optional[int] = None
+    match_method: Optional[str] = None
+    confidence: Optional[int] = None
+    rationale: Optional[str] = None
+    product_id: Optional[int] = None
+    product_name: Optional[str] = None
+    product_price: Optional[float] = None
+    product_currency: Optional[str] = None
+    product_min_price: Optional[float] = None
+    competitor_product_id: Optional[int] = None
+    competitor_product_title: Optional[str] = None
+    competitor_product_price: Optional[float] = None
+    competitor_product_currency: Optional[str] = None
+    competitor_product_is_trackable: Optional[bool] = None
+    competitor_site_relationship_type: Optional[str] = None
+    same_currency: Optional[bool] = None
+    price_delta_pct: Optional[float] = None
+    below_map: Optional[bool] = None
+    trend: Optional[TrendInfo] = None
+
+    # new_competitor_product only
+    new_product_count: Optional[int] = None
+    new_product_titles: Optional[list[str]] = None
 
 
 class ProductMetrics(BaseModel):

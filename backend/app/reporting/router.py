@@ -100,7 +100,9 @@ async def export_report_csv(
     import template. No PDF library exists in this stack; CSV plus the
     report page's own print stylesheet are the pragmatic v1 scope."""
     report = await _get_owned_report(db, report_id, workspace.id)
-    alert_by_match_id = {a["match_id"]: a["type"] for a in report.content.get("alerts", [])}
+    # .get(), not [] — a new_competitor_product alert has no match_id at
+    # all (it's scoped to a competitor site's whole catalog, not one match).
+    alert_by_match_id = {a["match_id"]: a["type"] for a in report.content.get("alerts", []) if a.get("match_id") is not None}
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)

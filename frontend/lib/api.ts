@@ -290,10 +290,42 @@ export interface PriceComparisonRow {
   trend: TrendInfo | null;
 }
 
-export interface AlertItem extends PriceComparisonRow {
-  type: "map_violation" | "price_anomaly";
+// Not every alert is about one specific confirmed match: map_violation and
+// price_anomaly are (every PriceComparisonRow field below is set);
+// new_competitor_product is scoped to a competitor site's whole catalog
+// instead (none of your own products involved), so those fields are null
+// and new_product_count/new_product_titles are set instead.
+// competitor_site_id/domain/name are the one thing every alert type has.
+export interface AlertItem {
+  type: "map_violation" | "price_anomaly" | "new_competitor_product";
   severity: "high" | "medium";
   message: string;
+  competitor_site_id: number;
+  competitor_site_domain: string;
+  competitor_site_name: string | null;
+
+  match_id?: number | null;
+  match_method?: "manual" | "ai_auto" | null;
+  confidence?: number | null;
+  rationale?: string | null;
+  product_id?: number | null;
+  product_name?: string | null;
+  product_price?: number | null;
+  product_currency?: string | null;
+  product_min_price?: number | null;
+  competitor_product_id?: number | null;
+  competitor_product_title?: string | null;
+  competitor_product_price?: number | null;
+  competitor_product_currency?: string | null;
+  competitor_product_is_trackable?: boolean | null;
+  competitor_site_relationship_type?: DiscoveryMode | null;
+  same_currency?: boolean | null;
+  price_delta_pct?: number | null;
+  below_map?: boolean | null;
+  trend?: TrendInfo | null;
+
+  new_product_count?: number | null;
+  new_product_titles?: string[] | null;
 }
 
 // Same-currency-gated comparison metrics for one product (see

@@ -560,15 +560,19 @@ _MAX_NARRATIVE_COVERAGE_SITES = 30
 _OBJECTIVE_GUIDANCE = {
     "market_research": (
         "landscape/positioning observations — how this business's pricing compares to the competitive set "
-        "overall, notable gaps or clusters worth knowing about."
+        "overall, notable gaps or clusters worth knowing about. If there are several genuinely distinct "
+        "observations (e.g. a specific catalog gap AND a specific pricing-tier pattern), write one "
+        "recommendation for each rather than merging them into one vague paragraph."
     ),
     "price_alignment": (
         "specific price-adjustment suggestions for individual products meaningfully out of line with tracked "
-        "competitors, citing the product by name and the direction/magnitude."
+        "competitors, citing the product by name and the direction/magnitude. Every product that genuinely "
+        "warrants attention gets its own recommendation — don't merge two different products into one."
     ),
     "map_compliance": (
         "concrete next steps for any reseller MAP violations found — which reseller to contact and about which "
-        "product — or explicit confirmation there are none this period."
+        "product — or explicit confirmation there are none this period. Every distinct violation (different "
+        "reseller or different product) gets its own recommendation, not one merged summary."
     ),
 }
 
@@ -608,10 +612,16 @@ _REPORT_NARRATIVE_PROMPT_TEMPLATE = (
     "3. competitive_gaps (3-5 sentences synthesizing the market-coverage data — catalog-size differences, and "
     "notable unmatched products by name from competitor-type sites only; if there are no saved competitor-type "
     "sites, say so plainly).\n"
-    "4. recommendations, ONLY for these selected business objectives: {objectives_list}. For each objective:\n"
+    "4. recommendations, ONLY for these selected business objectives: {objectives_list}. Do NOT cap yourself at "
+    "one recommendation per objective — a single objective can genuinely produce zero, one, or several "
+    "recommendations depending on how much real, distinct signal is in the data above; write as many specific, "
+    "well-crafted recommendations as the data actually supports, each citing real products/competitors/numbers "
+    "from above, never a vague generality. For each objective:\n"
     "{guidance_lines}\n"
-    "If there is nothing meaningful to say for a given objective given the data above, omit it rather than "
-    "padding.\n\n"
+    "The hard rule cuts both ways: if there is nothing meaningful to say for a given objective, omit it rather "
+    "than padding — never invent a second recommendation just to make the list look fuller, and never repeat "
+    "the same point twice with different wording to inflate the count. A correct list of one is better than a "
+    "padded list of three.\n\n"
     "Respond with ONLY a JSON object, no markdown fences, no commentary before or after: "
     '{{"executive_summary": "<2-4 sentences>", "market_position": "<3-5 sentences>", '
     '"competitive_gaps": "<3-5 sentences>", '
@@ -745,7 +755,7 @@ async def generate_report_narrative(
         client = AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
             model=model,
-            max_tokens=3000,
+            max_tokens=4000,
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(block.text for block in resp.content if block.type == "text")

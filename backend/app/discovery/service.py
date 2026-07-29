@@ -5,6 +5,8 @@ tracked matches to build a report but must not depend on the router module
 itself (that would couple it to the HTTP layer and invert the intended
 one-way dependency: reporting depends on discovery, never the reverse).
 """
+from datetime import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +17,7 @@ from app.discovery.models import CompetitorProduct, CompetitorSite, ProductMatch
 # _MAX_MATCH_OWN_PRODUCTS — bounds prompt size regardless of how large a
 # competitor's real discovered catalog gets.
 _MAX_UNMATCHED_SAMPLE_PER_SITE = 10
+_MAX_NEW_PRODUCTS_SAMPLE_PER_SITE = 10
 
 
 async def fetch_tracked_matches(
@@ -117,3 +120,56 @@ async def fetch_market_coverage(db: AsyncSession, workspace_id: int) -> dict:
         "total_competitor_products_discovered": sum(totals_by_site.values()),
         "sites": site_entries,
     }
+
+
+async def fetch_new_competitor_products(db: AsyncSession, workspace_id: int, since: datetime) -> list[dict]:
+    """Competitor products first discovered after `since` (the previous
+    report's generated_at) — the deterministic basis for reporting's
+    "new_competitor_product" alert. Only `status="saved"`,
+    `relationship_type="competitor"` sites: a reseller's new listings are
+    new sightings of THIS workspace's own products, not a rival launching
+    something (same reseller-exclusion reasoning as fetch_market_coverage).
+
+    Gated on the site having had at least one product discovered
+    at-or-before `since` too — otherwise a competitor only saved (or
+    first ever discovered) after the previous report would have its
+    entire starting catalog misread as "just launched N new products",
+    when really it's only new to US, not new to the market. Only sites
+    already being tracked with some real catalog depth qualify."""
+    had_products_before_ids = (
+        select(CompetitorProduct.competitor_site_id)
+        .where(CompetitorProduct.workspace_id == workspace_id, CompetitorProduct.discovered_at <= since)
+        .distinct()
+    )
+
+    result = await db.execute(
+        select(CompetitorProduct, CompetitorSite)
+        .join(CompetitorSite, CompetitorProduct.competitor_site_id == CompetitorSite.id)
+        .where(
+            CompetitorSite.workspace_id == workspace_id,
+            CompetitorSite.status == "saved",
+            CompetitorSite.relationship_type == "competitor",
+            CompetitorProduct.discovered_at > since,
+            CompetitorProduct.competitor_site_id.in_(had_products_before_ids),
+        )
+        .order_by(CompetitorProduct.discovered_at.desc())
+    )
+
+    by_site: dict[int, dict] = {}
+    order: list[int] = []
+    for product, site in result.all():
+        if site.id not in by_site:
+            by_site[site.id] = {
+                "competitor_site_id": site.id,
+                "competitor_site_domain": site.domain,
+                "competitor_site_name": site.name,
+                "new_product_count": 0,
+                "new_product_titles": [],
+            }
+            order.append(site.id)
+        entry = by_site[site.id]
+        entry["new_product_count"] += 1
+        if len(entry["new_product_titles"]) < _MAX_NEW_PRODUCTS_SAMPLE_PER_SITE:
+            entry["new_product_titles"].append(product.title)
+
+    return [by_site[site_id] for site_id in order]
