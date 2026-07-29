@@ -192,6 +192,7 @@ class CompetitorReportOut(BaseModel):
     id: int
     workspace_id: int
     fed_forward_from_report_id: Optional[int]
+    name: Optional[str]
     generated_at: datetime
     trigger_source: str
     ai_provider: str
@@ -201,3 +202,9 @@ class CompetitorReportOut(BaseModel):
     content: ReportContent
 
     model_config = {"from_attributes": True}
+
+
+class ReportRename(BaseModel):
+    # Empty/whitespace-only clears back to null — the frontend then falls
+    # back to displaying generated_at, same as a report that was never named.
+    name: str = ""

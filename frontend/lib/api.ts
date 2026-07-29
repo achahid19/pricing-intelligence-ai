@@ -410,6 +410,7 @@ export interface CompetitorReport {
   id: number;
   workspace_id: number;
   fed_forward_from_report_id: number | null;
+  name: string | null;
   generated_at: string;
   trigger_source: "manual" | "scheduled";
   ai_provider: string;
@@ -537,6 +538,31 @@ export const api = {
     list: () => request<CompetitorReport[]>("/reporting/reports"),
     get: (id: number) => request<CompetitorReport>(`/reporting/reports/${id}`),
     delete: (id: number) => request<void>(`/reporting/reports/${id}`, { method: "DELETE" }),
-    exportUrl: (id: number) => `/api/v1/reporting/reports/${id}/export.csv`,
+    rename: (id: number, name: string) =>
+      request<CompetitorReport>(`/reporting/reports/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+    // Bypasses the shared request() helper — a PDF response isn't JSON, and
+    // a plain <a href> can't carry the Bearer auth header, so this fetches
+    // the bytes directly and triggers the download via a synthetic anchor.
+    async downloadPdf(id: number, filenameHint?: string): Promise<void> {
+      const token = getToken();
+      const res = await fetch(`/api/v1/reporting/reports/${id}/export.pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(res.status, typeof body.detail === "string" ? body.detail : res.statusText);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filenameMatch?.[1] ?? filenameHint ?? `report_${id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    },
   },
 };

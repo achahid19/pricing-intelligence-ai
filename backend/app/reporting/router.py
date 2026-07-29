@@ -1,6 +1,3 @@
-import csv
-import io
-
 from fastapi import APIRouter, Depends, HTTPException, status as http_status
 from fastapi.responses import Response
 from sqlalchemy import select
@@ -9,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_workspace
 from app.reporting import service as reporting_service
 from app.reporting.models import CompetitorReport
-from app.reporting.schemas import CompetitorReportOut
+from app.reporting.pdf_export import build_report_pdf
+from app.reporting.schemas import CompetitorReportOut, ReportRename
 from app.services import ai_client
 from app.services.cooldown import check_cooldown
 from app.workspace.models import Workspace
@@ -75,6 +73,20 @@ async def get_report(
     return await _get_owned_report(db, report_id, workspace.id)
 
 
+@router.patch("/reports/{report_id}", response_model=CompetitorReportOut)
+async def rename_report(
+    report_id: int,
+    payload: ReportRename,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    report = await _get_owned_report(db, report_id, workspace.id)
+    report.name = payload.name.strip() or None
+    await db.commit()
+    await db.refresh(report)
+    return report
+
+
 @router.delete("/reports/{report_id}", status_code=http_status.HTTP_204_NO_CONTENT)
 async def delete_report(
     report_id: int,
@@ -89,53 +101,21 @@ async def delete_report(
     await db.commit()
 
 
-@router.get("/reports/{report_id}/export.csv")
-async def export_report_csv(
+@router.get("/reports/{report_id}/export.pdf")
+async def export_report_pdf(
     report_id: int,
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
-    """The spec's "exportable report" ask — a plain CSV of the price
-    comparison (+ any alert flag), same download pattern as catalog's
-    import template. No PDF library exists in this stack; CSV plus the
-    report page's own print stylesheet are the pragmatic v1 scope."""
+    """The spec's "exportable report" ask — a proper structured PDF (see
+    reporting/pdf_export.py), replacing the earlier CSV + browser-print
+    combo now that a real PDF library is in the stack."""
     report = await _get_owned_report(db, report_id, workspace.id)
-    # .get(), not [] — a new_competitor_product alert has no match_id at
-    # all (it's scoped to a competitor site's whole catalog, not one match).
-    alert_by_match_id = {a["match_id"]: a["type"] for a in report.content.get("alerts", []) if a.get("match_id") is not None}
-
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(
-        [
-            "product_name", "product_price", "product_currency", "product_min_price",
-            "price_rank", "total_competitors_compared", "same_currency_competitors_count",
-            "sellers_cheaper", "price_index", "cheapest_competitor_name", "cheapest_competitor_price",
-            "competitor_site_domain", "competitor_product_title",
-            "competitor_product_price", "competitor_product_currency",
-            "price_delta_pct", "alert",
-        ]
-    )
-    # One row per confirmed match (same grain as before) — a product's
-    # metrics are denormalized onto every one of its match rows rather than
-    # mixed in as a separate summary row shape, so the CSV stays a single
-    # flat grain a spreadsheet can pivot on directly.
-    for group in report.content.get("price_comparison", []):
-        m = group["metrics"]
-        for row in group["matches"]:
-            writer.writerow(
-                [
-                    group["product_name"], group["product_price"], group["product_currency"], group["product_min_price"],
-                    m["price_rank"], m["total_competitors_compared"], m["same_currency_competitors_count"],
-                    m["sellers_cheaper"], m["price_index"], m["cheapest_competitor_name"], m["cheapest_competitor_price"],
-                    row["competitor_site_domain"], row["competitor_product_title"],
-                    row["competitor_product_price"], row["competitor_product_currency"],
-                    row["price_delta_pct"], alert_by_match_id.get(row["match_id"], ""),
-                ]
-            )
-
+    pdf_bytes = build_report_pdf(report, workspace)
+    date_str = report.generated_at.strftime("%Y-%m-%d")
+    filename = f"report_{date_str}_{report_id}.pdf"
     return Response(
-        content=buffer.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="report_{report_id}.csv"'},
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

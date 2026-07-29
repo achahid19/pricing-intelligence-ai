@@ -8,6 +8,7 @@ import {
   ArrowDownRight,
   ArrowLeft,
   ArrowUpRight,
+  Check,
   Compass,
   Download,
   FileText,
@@ -15,7 +16,7 @@ import {
   Lightbulb,
   Link2,
   Minus,
-  Printer,
+  Pencil,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -26,6 +27,7 @@ import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   api,
@@ -225,6 +227,11 @@ export default function ReportDetailPage() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
 
   useEffect(() => {
     api.reporting.get(reportId).then(setReport).catch(() => setNotFound(true));
@@ -238,6 +245,32 @@ export default function ReportDetailPage() {
     } catch (err) {
       setDeleteError(err instanceof ApiError ? err.message : "Couldn't delete this report. Try again.");
       setDeleting(false);
+    }
+  }
+
+  async function handleDownload() {
+    setActionError(null);
+    setDownloading(true);
+    try {
+      await api.reporting.downloadPdf(reportId);
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't download this report. Try again.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  async function handleSaveName() {
+    setActionError(null);
+    setSavingName(true);
+    try {
+      const updated = await api.reporting.rename(reportId, nameDraft);
+      setReport(updated);
+      setRenaming(false);
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't rename this report. Try again.");
+    } finally {
+      setSavingName(false);
     }
   }
 
@@ -287,39 +320,78 @@ export default function ReportDetailPage() {
   // every panel hidden (no useEffect needed, self-corrects every render).
   const effectiveTab: TabKey = tab === "coverage" && !hasCoverage ? "overview" : tab;
 
+  const dateLabel = new Date(report.generated_at).toLocaleString();
+
   return (
     <div className="mx-auto max-w-6xl px-8 py-10">
-      <style>
-        {"@media print { aside, .no-print { display: none !important; } .tab-panel { display: block !important; margin-top: 1.5rem; } }"}
-      </style>
-
-      <Link href="/reports" className="no-print inline-flex items-center gap-1.5 text-sm text-slate-soft hover:text-ink">
+      <Link href="/reports" className="inline-flex items-center gap-1.5 text-sm text-slate-soft hover:text-ink">
         <ArrowLeft className="size-4" />
         Back to Reports
       </Link>
 
       <div className="mt-4">
         <PageHeader
-          title={new Date(report.generated_at).toLocaleString()}
+          title={
+            renaming ? (
+              <div className="flex items-center gap-1.5">
+                <Input
+                  autoFocus
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveName();
+                    if (e.key === "Escape") setRenaming(false);
+                  }}
+                  placeholder={dateLabel}
+                  className="h-9 max-w-xs text-lg"
+                />
+                <button
+                  onClick={handleSaveName}
+                  disabled={savingName}
+                  aria-label="Save name"
+                  className="rounded-md p-1.5 text-slate-soft transition-colors hover:bg-good/10 hover:text-good"
+                >
+                  <Check className="size-4" />
+                </button>
+                <button
+                  onClick={() => setRenaming(false)}
+                  disabled={savingName}
+                  aria-label="Cancel rename"
+                  className="rounded-md p-1.5 text-slate-soft transition-colors hover:bg-black/[0.03] hover:text-ink"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+            ) : (
+              <span className="inline-flex items-center gap-2">
+                {report.name || dateLabel}
+                <button
+                  onClick={() => {
+                    setNameDraft(report.name ?? "");
+                    setRenaming(true);
+                  }}
+                  aria-label="Rename report"
+                  className="rounded-md p-1 text-slate-soft transition-colors hover:text-ink"
+                >
+                  <Pencil className="size-4" />
+                </button>
+              </span>
+            )
+          }
           description={
             <span className="inline-flex items-center gap-2">
               <Badge tone={STATUS_TONE[report.status] ?? "neutral"} className="capitalize">
                 {report.status}
               </Badge>
               <span className="capitalize">{report.trigger_source}</span>
+              {report.name && <span>· {dateLabel}</span>}
             </span>
           }
           actions={
-            <div className="no-print flex gap-2">
-              <a href={api.reporting.exportUrl(report.id)} download>
-                <Button variant="outline" size="sm">
-                  <Download className="size-3.5" />
-                  Export CSV
-                </Button>
-              </a>
-              <Button variant="outline" size="sm" onClick={() => window.print()}>
-                <Printer className="size-3.5" />
-                Print
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={handleDownload} disabled={downloading}>
+                <Download className="size-3.5" />
+                {downloading ? "Preparing…" : "Export PDF"}
               </Button>
               {confirmingDelete ? (
                 <>
@@ -354,6 +426,7 @@ export default function ReportDetailPage() {
       )}
 
       {deleteError && <p className="mt-4 text-sm text-danger">{deleteError}</p>}
+      {actionError && <p className="mt-4 text-sm text-danger">{actionError}</p>}
 
       {/* At-a-glance KPIs so a manager can read the headline numbers without
           scrolling into any section's detail. */}
@@ -378,7 +451,7 @@ export default function ReportDetailPage() {
       {/* Tabs instead of one long vertical stack — the narrative, the
           product-by-product comparison, and the full-catalog coverage detail
           are three different reading tasks, not something scanned together. */}
-      <div className="no-print mt-8 flex items-center gap-1 border-b border-border">
+      <div className="mt-8 flex items-center gap-1 border-b border-border">
         {tabs.map(([key, label, count]) => (
           <button
             key={key}

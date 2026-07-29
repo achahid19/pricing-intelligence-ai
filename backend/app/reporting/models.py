@@ -34,6 +34,10 @@ class CompetitorReport(Base):
     workspace_id: Mapped[int] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # User-assigned label (e.g. "Q3 competitor check-in"). Null means the
+    # frontend falls back to displaying generated_at — a report is always
+    # identifiable by its timestamp, this is purely an optional convenience.
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
     # SET NULL, not CASCADE — deleting an old report shouldn't cascade into
     # deleting a newer one that references it for "since last time" framing.
     fed_forward_from_report_id: Mapped[int | None] = mapped_column(
