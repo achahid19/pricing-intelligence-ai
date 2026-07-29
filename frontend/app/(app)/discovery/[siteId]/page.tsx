@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Check, ExternalLink, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, Search, Sparkles, X } from "lucide-react";
 
 import { ConfidenceBadge } from "@/components/discovery/ConfidenceBadge";
 import { Badge } from "@/components/ui/badge";
@@ -185,6 +185,7 @@ export default function CompetitorProductsPage() {
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [search, setSearch] = useState("");
 
   const load = useCallback(() => {
     api.discovery.getSite(siteId).then(setSite).catch(() => setNotFound(true));
@@ -211,6 +212,16 @@ export default function CompetitorProductsPage() {
     }
     return map;
   }, [matches]);
+  const filteredProducts = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return products ?? [];
+    return (products ?? []).filter(
+      (p) =>
+        p.title.toLowerCase().includes(query) ||
+        p.description?.toLowerCase().includes(query) ||
+        p.additional_info?.toLowerCase().includes(query)
+    );
+  }, [products, search]);
   const allCandidatesSelected =
     candidateMatches.length > 0 && candidateMatches.every((m) => selectedIds.has(m.id));
   const confirmedMatchCount = useMemo(() => (matches ?? []).filter((m) => m.status === "confirmed").length, [matches]);
@@ -401,8 +412,22 @@ export default function CompetitorProductsPage() {
           {products && products.length === 0 && (
             <p className="text-sm text-slate">No products discovered yet — click "Discover products" above.</p>
           )}
+          {products && products.length > 0 && (
+            <div className="relative mb-4 max-w-sm">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-soft" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search discovered products…"
+                className="pl-9"
+              />
+            </div>
+          )}
+          {products && products.length > 0 && filteredProducts.length === 0 && (
+            <p className="text-sm text-slate">No products match your search.</p>
+          )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {products?.map((p) => (
+            {filteredProducts.map((p) => (
               <Card key={p.id}>
                 <div className="flex flex-wrap items-center gap-2">
                   <a
@@ -517,9 +542,23 @@ export default function CompetitorProductsPage() {
                   </div>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-slate-soft">{site.name || site.domain}&rsquo;s products</p>
-                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {products.map((p) => (
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium text-slate-soft">{site.name || site.domain}&rsquo;s products</p>
+                  </div>
+                  <div className="relative mt-2 mb-2 max-w-xs">
+                    <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-soft" />
+                    <Input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search discovered products…"
+                      className="h-9 pl-9 text-sm"
+                    />
+                  </div>
+                  {filteredProducts.length === 0 && (
+                    <p className="text-sm text-slate">No products match your search.</p>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {filteredProducts.map((p) => (
                       <CompetitorProductChip key={p.id} product={p} />
                     ))}
                   </div>
