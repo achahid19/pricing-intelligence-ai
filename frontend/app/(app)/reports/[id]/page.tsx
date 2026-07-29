@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -13,8 +13,10 @@ import {
   Lightbulb,
   Link2,
   Printer,
+  Trash2,
   TrendingDown,
   TrendingUp,
+  X,
 } from "lucide-react";
 
 import { Badge, type BadgeTone } from "@/components/ui/badge";
@@ -23,6 +25,7 @@ import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   api,
+  ApiError,
   KNOWN_OBJECTIVES,
   type CompetitorReport,
   type PriceComparisonRow,
@@ -167,15 +170,30 @@ const TAB_OPTIONS = ["overview", "comparison", "coverage"] as const;
 
 export default function ReportDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const reportId = Number(params.id);
 
   const [report, setReport] = useState<CompetitorReport | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = usePersistedTab<TabKey>("tab", `report-tab-${reportId}`, TAB_OPTIONS, "overview");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     api.reporting.get(reportId).then(setReport).catch(() => setNotFound(true));
   }, [reportId]);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await api.reporting.delete(reportId);
+      router.push("/reports");
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : "Couldn't delete this report. Try again.");
+      setDeleting(false);
+    }
+  }
 
   if (notFound) {
     return (
@@ -245,6 +263,27 @@ export default function ReportDetailPage() {
                 <Printer className="size-3.5" />
                 Print
               </Button>
+              {confirmingDelete ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="border-danger/30 text-danger hover:bg-danger/10"
+                  >
+                    {deleting ? "Deleting…" : "Confirm delete"}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+                    <X className="size-3.5" />
+                  </Button>
+                </>
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => setConfirmingDelete(true)}>
+                  <Trash2 className="size-3.5" />
+                  Delete
+                </Button>
+              )}
             </div>
           }
         />
@@ -255,6 +294,8 @@ export default function ReportDetailPage() {
           The AI summary couldn't be generated ({report.error_message}) — the price comparison below is still accurate.
         </p>
       )}
+
+      {deleteError && <p className="mt-4 text-sm text-danger">{deleteError}</p>}
 
       {/* At-a-glance KPIs so a manager can read the headline numbers without
           scrolling into any section's detail. */}

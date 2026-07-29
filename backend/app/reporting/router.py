@@ -75,6 +75,20 @@ async def get_report(
     return await _get_owned_report(db, report_id, workspace.id)
 
 
+@router.delete("/reports/{report_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+async def delete_report(
+    report_id: int,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """fed_forward_from_report_id is ON DELETE SET NULL (models.py), so a
+    later report chained off this one just loses its "since last time"
+    reference rather than blocking the delete."""
+    report = await _get_owned_report(db, report_id, workspace.id)
+    await db.delete(report)
+    await db.commit()
+
+
 @router.get("/reports/{report_id}/export.csv")
 async def export_report_csv(
     report_id: int,

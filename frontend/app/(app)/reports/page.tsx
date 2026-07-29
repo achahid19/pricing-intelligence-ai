@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Trash2, X } from "lucide-react";
 
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -20,6 +20,8 @@ export default function ReportsPage() {
   const [reports, setReports] = useState<CompetitorReport[] | null>(null);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   function load() {
     api.reporting.list().then(setReports).catch(() => setReports([]));
@@ -39,6 +41,19 @@ export default function ReportsPage() {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function handleDelete(id: number) {
+    setDeleting(id);
+    try {
+      await api.reporting.delete(id);
+      setConfirmingDelete(null);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't delete this report. Try again.");
+    } finally {
+      setDeleting(null);
     }
   }
 
@@ -85,9 +100,43 @@ export default function ReportsPage() {
                   <span className="text-sm font-medium text-ink">
                     {new Date(report.generated_at).toLocaleString()}
                   </span>
-                  <Badge tone={STATUS_TONE[report.status] ?? "neutral"} className="capitalize">
-                    {report.status}
-                  </Badge>
+                  <div
+                    className="flex shrink-0 items-center gap-2"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                  >
+                    <Badge tone={STATUS_TONE[report.status] ?? "neutral"} className="capitalize">
+                      {report.status}
+                    </Badge>
+                    {confirmingDelete === report.id ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleDelete(report.id)}
+                          disabled={deleting === report.id}
+                          className="rounded-md px-2 py-1 text-xs font-medium text-danger transition-colors hover:bg-danger/10"
+                        >
+                          {deleting === report.id ? "…" : "Confirm"}
+                        </button>
+                        <button
+                          onClick={() => setConfirmingDelete(null)}
+                          aria-label="Cancel delete"
+                          className="rounded-md p-1.5 text-slate-soft transition-colors hover:bg-black/[0.03] hover:text-ink"
+                        >
+                          <X className="size-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmingDelete(report.id)}
+                        aria-label="Delete report"
+                        className="rounded-md p-1.5 text-slate-soft transition-colors hover:bg-danger/10 hover:text-danger"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <p className="mt-1 text-xs text-slate-soft capitalize">{report.trigger_source}</p>
                 <p className="mt-2 text-sm text-slate">

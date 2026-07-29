@@ -500,6 +500,7 @@ export const api = {
     create: () => request<CompetitorReport>("/reporting/reports", { method: "POST" }),
     list: () => request<CompetitorReport[]>("/reporting/reports"),
     get: (id: number) => request<CompetitorReport>(`/reporting/reports/${id}`),
+    delete: (id: number) => request<void>(`/reporting/reports/${id}`, { method: "DELETE" }),
     exportUrl: (id: number) => `/api/v1/reporting/reports/${id}/export.csv`,
   },
 };
