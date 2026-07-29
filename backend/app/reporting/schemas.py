@@ -108,6 +108,13 @@ class MarketCoverage(BaseModel):
 
 
 class SummaryStats(BaseModel):
+    """price_increases/price_decreases count competitors whose own price
+    rose/fell since the previous report (from `trend`, a real time
+    comparison) — never how many are currently pricier/cheaper than you
+    (that's a snapshot comparison with no time dimension, see
+    reporting/service.py's _build_summary_stats). Both are 0 whenever
+    there's no previous report to compare against yet."""
+
     matches_tracked: int
     alerts_count: int
     map_violations_count: int

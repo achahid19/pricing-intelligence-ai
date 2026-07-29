@@ -199,13 +199,23 @@ def _build_alerts(rows: list[dict]) -> list[dict]:
 
 
 def _build_summary_stats(rows: list[dict], alerts: list[dict]) -> dict:
+    """price_increases/price_decreases must come from `trend` (a
+    competitor's own price now vs. its CompetitorProductSnapshot at the
+    previous report) — NOT from `price_delta_pct` (your price vs. that
+    competitor's price right now, a snapshot comparison with no time
+    dimension at all). Mixing the two up was a real bug: a competitor
+    simply priced higher than you today isn't a "price increase" unless
+    it actually rose since last time, and on a workspace's very first
+    report (no previous report to compare against) trend is always None,
+    so these correctly read 0/0 rather than double as an ersatz
+    higher/lower-than-you count."""
     return {
         "matches_tracked": len(rows),
         "alerts_count": len(alerts),
         "map_violations_count": sum(1 for a in alerts if a["type"] == "map_violation"),
         "price_anomalies_count": sum(1 for a in alerts if a["type"] == "price_anomaly"),
-        "price_increases": sum(1 for r in rows if r["price_delta_pct"] is not None and r["price_delta_pct"] > 0),
-        "price_decreases": sum(1 for r in rows if r["price_delta_pct"] is not None and r["price_delta_pct"] < 0),
+        "price_increases": sum(1 for r in rows if r.get("trend") and r["trend"]["direction"] == "up"),
+        "price_decreases": sum(1 for r in rows if r.get("trend") and r["trend"]["direction"] == "down"),
         "no_price_count": sum(1 for r in rows if not r["competitor_product_is_trackable"]),
     }
 

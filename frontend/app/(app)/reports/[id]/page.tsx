@@ -5,13 +5,16 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  ArrowDownRight,
   ArrowLeft,
+  ArrowUpRight,
   Compass,
   Download,
   FileText,
   Layers,
   Lightbulb,
   Link2,
+  Minus,
   Printer,
   Trash2,
   TrendingDown,
@@ -22,6 +25,7 @@ import {
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   api,
@@ -53,11 +57,13 @@ function StatTile({
   label,
   value,
   tone,
+  tooltip,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: number;
   tone?: "danger" | "good";
+  tooltip?: string;
 }) {
   return (
     <Card className="flex items-center gap-3">
@@ -71,23 +77,59 @@ function StatTile({
       </div>
       <div>
         <p className="text-xl font-semibold tabular-nums leading-tight text-ink">{value}</p>
-        <p className="text-xs text-slate-soft">{label}</p>
+        <p className="flex items-center gap-1 text-xs text-slate-soft">
+          {label}
+          {tooltip && <InfoTooltip text={tooltip} />}
+        </p>
       </div>
     </Card>
   );
 }
 
-function MetricsBadges({ metrics }: { metrics: ProductMetrics }) {
+function MetricsBadges({
+  metrics,
+  productPrice,
+  productCurrency,
+}: {
+  metrics: ProductMetrics;
+  productPrice: number;
+  productCurrency: string;
+}) {
   if (metrics.price_rank == null) {
     return <Badge tone="neutral">No same-currency data</Badge>;
   }
+  // Derived, not a new backend field: price_index = product_price / marketAvg * 100.
+  const marketAvg = metrics.price_index ? (productPrice / metrics.price_index) * 100 : null;
   return (
     <div className="flex flex-col items-start gap-1">
       <Badge tone="accent">
         Rank #{metrics.price_rank} of {metrics.same_currency_competitors_count + 1}
       </Badge>
       <Badge tone="neutral">Index {metrics.price_index}</Badge>
+      {marketAvg != null && (
+        <span className="text-xs text-slate-soft">
+          Avg {productCurrency} {marketAvg.toFixed(2)} · {metrics.sellers_cheaper}/{metrics.same_currency_competitors_count} cheaper
+        </span>
+      )}
     </div>
+  );
+}
+
+// A competitor's own price trend since the previous report — independent
+// of same_currency, since it only ever compares that competitor's price
+// to itself over time, never to your own price. Shown even on
+// cross-currency rows, where price_delta_pct/priceDeltaFromPct can't say
+// anything at all.
+function TrendIndicator({ trend }: { trend: PriceComparisonRow["trend"] }) {
+  if (!trend || trend.direction === "same") return null;
+  const Icon = trend.direction === "up" ? ArrowUpRight : ArrowDownRight;
+  return (
+    <span
+      title={`${trend.direction === "up" ? "Up" : "Down"} ${Math.abs(trend.delta_pct)}% since the previous report (was ${trend.previous_price.toFixed(2)} on ${new Date(trend.previous_checked_at).toLocaleDateString()})`}
+      className={cn("inline-flex items-center", trend.is_anomaly ? "text-accent" : "text-slate-soft")}
+    >
+      <Icon className="size-3" />
+    </span>
   );
 }
 
@@ -109,6 +151,7 @@ function MatchPill({ row }: { row: PriceComparisonRow }) {
       ) : (
         <span className="text-slate-soft">no price</span>
       )}
+      <TrendIndicator trend={row.trend} />
       {row.below_map && (
         <Badge tone="danger" className="px-1.5 py-0">
           MAP
@@ -302,8 +345,19 @@ export default function ReportDetailPage() {
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile icon={Link2} label="Matches tracked" value={stats.matches_tracked} />
         <StatTile icon={AlertTriangle} label="Alerts" value={stats.alerts_count} tone={stats.alerts_count > 0 ? "danger" : undefined} />
-        <StatTile icon={TrendingUp} label="Price increases" value={stats.price_increases} />
-        <StatTile icon={TrendingDown} label="Price decreases" value={stats.price_decreases} tone={stats.price_decreases > 0 ? "good" : undefined} />
+        <StatTile
+          icon={TrendingUp}
+          label="Price increases"
+          value={stats.price_increases}
+          tooltip="Competitors whose own price rose since the previous report — not how many are pricier than you right now."
+        />
+        <StatTile
+          icon={TrendingDown}
+          label="Price decreases"
+          value={stats.price_decreases}
+          tone={stats.price_decreases > 0 ? "good" : undefined}
+          tooltip="Competitors whose own price dropped since the previous report. Both tiles read 0 on a workspace's first report — there's no prior price yet to compare against."
+        />
       </div>
 
       {/* Tabs instead of one long vertical stack — the narrative, the
@@ -365,12 +419,6 @@ export default function ReportDetailPage() {
           </SectionCard>
         )}
 
-        {report.content.competitive_gaps && (
-          <SectionCard icon={Layers} title="Competitive gaps">
-            {report.content.competitive_gaps}
-          </SectionCard>
-        )}
-
         {report.content.recommendations.length > 0 && (
           <div>
             <h2 className="mb-2 flex items-center gap-2 text-sm font-medium text-ink">
@@ -410,9 +458,14 @@ export default function ReportDetailPage() {
                     <div className="text-xs tabular-nums text-slate-soft">
                       {group.product_currency} {group.product_price.toFixed(2)}
                     </div>
+                    {group.product_min_price != null && (
+                      <div className="text-xs tabular-nums text-slate-soft" title="Minimum advertised price (MAP)">
+                        MAP {group.product_currency} {group.product_min_price.toFixed(2)}
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-3">
-                    <MetricsBadges metrics={group.metrics} />
+                    <MetricsBadges metrics={group.metrics} productPrice={group.product_price} productCurrency={group.product_currency} />
                   </td>
                   <td className="px-3 py-3">
                     {group.metrics.cheapest_competitor_name ? (
@@ -450,9 +503,11 @@ export default function ReportDetailPage() {
       </div>
 
       {hasCoverage && (
-        <div className={cn("tab-panel mt-6", effectiveTab !== "coverage" && "hidden")}>
+        <div className={cn("tab-panel mt-6 space-y-4", effectiveTab !== "coverage" && "hidden")}>
           {report.content.competitive_gaps && (
-            <p className="mb-4 text-sm leading-relaxed text-slate">{report.content.competitive_gaps}</p>
+            <SectionCard icon={Layers} title="Competitive gaps">
+              {report.content.competitive_gaps}
+            </SectionCard>
           )}
           {report.content.market_coverage.sites.length > 0 && (
             <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
