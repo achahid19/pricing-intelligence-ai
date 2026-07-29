@@ -290,19 +290,20 @@ export interface PriceComparisonRow {
   trend: TrendInfo | null;
 }
 
-// Not every alert is about one specific confirmed match: map_violation and
-// price_anomaly are (every PriceComparisonRow field below is set);
-// new_competitor_product is scoped to a competitor site's whole catalog
-// instead (none of your own products involved), so those fields are null
-// and new_product_count/new_product_titles are set instead.
-// competitor_site_id/domain/name are the one thing every alert type has.
+// Not every alert is about one specific confirmed match, or even about a
+// competitor at all: map_violation and price_anomaly are match-scoped
+// (every PriceComparisonRow field below is set); new_competitor_product is
+// scoped to a competitor site's whole catalog (none of your own products
+// involved); own_price_change is scoped to one of YOUR OWN products with
+// no competitor involved at all — competitor_site_id/domain/name are null
+// for that type, which is why they're optional here.
 export interface AlertItem {
-  type: "map_violation" | "price_anomaly" | "new_competitor_product";
+  type: "map_violation" | "price_anomaly" | "new_competitor_product" | "own_price_change";
   severity: "high" | "medium";
   message: string;
-  competitor_site_id: number;
-  competitor_site_domain: string;
-  competitor_site_name: string | null;
+  competitor_site_id?: number | null;
+  competitor_site_domain?: string | null;
+  competitor_site_name?: string | null;
 
   match_id?: number | null;
   match_method?: "manual" | "ai_auto" | null;
@@ -351,6 +352,9 @@ export interface ProductComparisonGroup {
   product_price: number;
   product_currency: string;
   product_min_price: number | null;
+  // Your own price's trend since the previous report — product-level, not
+  // per-match. Null on a first report or when the price hasn't changed.
+  own_trend: TrendInfo | null;
   metrics: ProductMetrics;
   matches: PriceComparisonRow[];
 }

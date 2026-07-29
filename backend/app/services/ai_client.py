@@ -636,6 +636,12 @@ def _format_comparison_groups_for_narrative(groups: list[dict]) -> str:
         own = f"{g['product_name']} (yours: {g['product_currency']} {g['product_price']:.2f}"
         if g["product_min_price"] is not None:
             own += f", MAP {g['product_min_price']:.2f}"
+        own_trend = g.get("own_trend")
+        if own_trend and own_trend["direction"] != "same":
+            own += (
+                f", you {own_trend['direction']} it {abs(own_trend['delta_pct']):.0f}% since your last report "
+                f"from {g['product_currency']} {own_trend['previous_price']:.2f}"
+            )
         own += ")"
         lines.append(f"- {own}")
 

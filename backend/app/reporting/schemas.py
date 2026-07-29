@@ -38,21 +38,25 @@ class PriceComparisonRow(BaseModel):
 
 
 class AlertItem(BaseModel):
-    """Not every alert is about one specific confirmed match: map_violation
-    and price_anomaly are (all PriceComparisonRow fields below are set,
-    same full row context as before so the frontend never has to look
-    anything up); new_competitor_product is scoped to a competitor SITE's
-    whole catalog instead — none of your own products are involved at all,
-    so those fields stay null and new_product_count/new_product_titles are
-    set instead. competitor_site_id/domain/name are the one thing every
-    alert type always has, since every alert is about some competitor."""
+    """Not every alert is about one specific confirmed match, or even about
+    a competitor at all: map_violation and price_anomaly are match-scoped
+    (all PriceComparisonRow fields below are set, same full row context as
+    before so the frontend never has to look anything up); new_competitor_
+    product is scoped to a competitor SITE's whole catalog (none of your
+    own products involved); own_price_change is scoped to one of YOUR OWN
+    products with no competitor involved at all — competitor_site_id/
+    domain/name are null for that type, which is why they're optional
+    here rather than always-present like the earlier alert-only design."""
 
-    type: Literal["map_violation", "price_anomaly", "new_competitor_product"]
+    type: Literal["map_violation", "price_anomaly", "new_competitor_product", "own_price_change"]
     severity: Literal["high", "medium"]
     message: str
-    competitor_site_id: int
-    competitor_site_domain: str
-    competitor_site_name: Optional[str]
+
+    # map_violation / price_anomaly / new_competitor_product only — every
+    # alert about a competitor has these; own_price_change has none.
+    competitor_site_id: Optional[int] = None
+    competitor_site_domain: Optional[str] = None
+    competitor_site_name: Optional[str] = None
 
     # map_violation / price_anomaly only
     match_id: Optional[int] = None
@@ -73,6 +77,11 @@ class AlertItem(BaseModel):
     same_currency: Optional[bool] = None
     price_delta_pct: Optional[float] = None
     below_map: Optional[bool] = None
+    # price_anomaly (a competitor's own price vs. its history) and
+    # own_price_change (this workspace's own price vs. its history) share
+    # this same field — both are exactly a TrendInfo, just about a
+    # different price series; product_id/name/price/currency above are
+    # also shared and populated for own_price_change.
     trend: Optional[TrendInfo] = None
 
     # new_competitor_product only
@@ -107,6 +116,11 @@ class ProductComparisonGroup(BaseModel):
     product_price: float
     product_currency: str
     product_min_price: Optional[float]
+    # Your own price's trend since the previous report — a product-level
+    # property (not per-match, unlike everything in `matches`), computed
+    # once from ProductSnapshot regardless of how many competitors it's
+    # matched against. None on a first report or when unchanged.
+    own_trend: Optional[TrendInfo] = None
     metrics: ProductMetrics
     matches: list[PriceComparisonRow]
 

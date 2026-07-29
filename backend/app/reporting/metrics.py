@@ -71,6 +71,7 @@ def group_comparison_rows(rows: list[dict]) -> list[dict]:
                 "product_price": row["product_price"],
                 "product_currency": row["product_currency"],
                 "product_min_price": row["product_min_price"],
+                "own_trend": row["own_trend"],
                 "matches": [],
             }
             order.append(pid)

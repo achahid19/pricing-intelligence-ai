@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, ForeignKey, Numeric, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
 
@@ -50,3 +50,39 @@ class Product(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+    snapshots: Mapped[list["ProductSnapshot"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan"
+    )
+
+
+class ProductSnapshot(Base):
+    """
+    A price reading for one of the workspace's own Products — mirrors
+    CompetitorProductSnapshot's role (see discovery/models.py), but the
+    write trigger is different: a competitor's price is re-observed by
+    discovery re-runs regardless of whether it actually changed, so that
+    table gets a row on every touch; a workspace's own price only ever
+    changes through an explicit edit made through this app, so a row here
+    is written only when the price is set (on creation) or genuinely
+    changes (on edit) — never a snapshot storm from re-saving the same
+    value. Without this, reporting/service.py's _compute_own_trend has no
+    way to recover "what was this priced at, as of the previous report"
+    once a price has been overwritten.
+    """
+    __tablename__ = "product_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+    product: Mapped["Product"] = relationship(back_populates="snapshots")

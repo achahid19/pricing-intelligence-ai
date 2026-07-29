@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_workspace
-from app.catalog.models import Product
+from app.catalog.models import Product, ProductSnapshot
 from app.catalog.schemas import AiDescribeOut, ImportResultOut, ProductCreate, ProductOut, ProductUpdate
 from app.db.database import get_db
 from app.services import ai_client
@@ -37,6 +37,10 @@ async def create_product(
     db: AsyncSession = Depends(get_db),
 ):
     product = Product(workspace_id=workspace.id, import_source="manual", **payload.model_dump())
+    # A starting-price snapshot, same reasoning as every creation path
+    # below — without one, a price edited before the first report has no
+    # baseline to diff against, even though the product clearly existed.
+    product.snapshots.append(ProductSnapshot(workspace_id=workspace.id, price=product.price))
     db.add(product)
     await db.commit()
     await db.refresh(product)
@@ -65,8 +69,23 @@ async def update_product(
     product = await db.get(Product, product_id)
     if product is None or product.workspace_id != workspace.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    old_price = product.price
+    for field, value in updates.items():
         setattr(product, field, value)
+    # Only when price actually changed — never a snapshot for a save that
+    # only touched description/category/etc, and never a duplicate row
+    # for re-saving the same price unchanged.
+    #
+    # Built directly (not via product.snapshots.append(...)) and on
+    # purpose: `product` here was loaded from the DB via db.get(), so its
+    # `.snapshots` collection is lazy — touching it outside an explicit
+    # await raises MissingGreenlet under the async engine. create_product/
+    # import_products can use .append() safely because those `Product`
+    # instances are brand new and transient (never loaded), so the
+    # collection starts as an empty in-memory list with nothing to fetch.
+    if "price" in updates and float(product.price) != float(old_price):
+        db.add(ProductSnapshot(workspace_id=workspace.id, product_id=product.id, price=product.price))
     await db.commit()
     await db.refresh(product)
     return product
@@ -273,6 +292,7 @@ async def import_products(
             description=row.get("description") or None,
             import_source="csv",
         )
+        product.snapshots.append(ProductSnapshot(workspace_id=workspace.id, price=product.price))
         db.add(product)
         if sku:
             existing_skus.add(sku.lower())

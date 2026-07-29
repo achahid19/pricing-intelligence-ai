@@ -35,6 +35,7 @@ import {
   type PriceComparisonRow,
   type ProductMetrics,
   type SiteCoverage,
+  type TrendInfo,
 } from "@/lib/api";
 import { priceDeltaFromPct } from "@/lib/pricing";
 import { usePersistedTab } from "@/lib/usePersistedTab";
@@ -44,6 +45,7 @@ const ALERT_TONE: Record<string, BadgeTone> = {
   map_violation: "danger",
   price_anomaly: "accent",
   new_competitor_product: "accent",
+  own_price_change: "accent",
 };
 
 const STATUS_TONE: Record<string, BadgeTone> = {
@@ -121,7 +123,7 @@ function MetricsBadges({
 // to itself over time, never to your own price. Shown even on
 // cross-currency rows, where price_delta_pct/priceDeltaFromPct can't say
 // anything at all.
-function TrendIndicator({ trend }: { trend: PriceComparisonRow["trend"] }) {
+function TrendIndicator({ trend }: { trend: TrendInfo | null | undefined }) {
   if (!trend || trend.direction === "same") return null;
   const Icon = trend.direction === "up" ? ArrowUpRight : ArrowDownRight;
   return (
@@ -270,6 +272,7 @@ export default function ReportDetailPage() {
   const newCompetitorProducts = report.content.alerts
     .filter((a) => a.type === "new_competitor_product")
     .reduce((sum, a) => sum + (a.new_product_count ?? 0), 0);
+  const ownPriceChanges = report.content.alerts.filter((a) => a.type === "own_price_change").length;
 
   const tabs: Array<[TabKey, string, number | undefined]> = [
     ["overview", "Overview", undefined],
@@ -436,23 +439,40 @@ export default function ReportDetailPage() {
           <Badge tone={newCompetitorProducts > 0 ? "accent" : "neutral"}>
             {newCompetitorProducts} new competitor product{newCompetitorProducts === 1 ? "" : "s"}
           </Badge>
+          <Badge tone={ownPriceChanges > 0 ? "accent" : "neutral"}>
+            {ownPriceChanges} own price change{ownPriceChanges === 1 ? "" : "s"}
+          </Badge>
         </div>
 
         {report.content.alerts.length > 0 ? (
           <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
             {report.content.alerts.map((alert) => (
-              <Card key={`${alert.type}-${alert.match_id ?? alert.competitor_site_id}`} className="flex items-start gap-2">
+              <Card
+                key={`${alert.type}-${alert.match_id ?? alert.competitor_site_id ?? alert.product_id}`}
+                className="flex items-start gap-2"
+              >
                 <Badge tone={ALERT_TONE[alert.type] ?? "neutral"} className="mt-0.5 shrink-0 capitalize">
                   {alert.type.replaceAll("_", " ")}
                 </Badge>
                 <div className="min-w-0">
                   <p className="text-sm text-ink">{alert.message}</p>
-                  <Link
-                    href={`/discovery/${alert.competitor_site_id}`}
-                    className="mt-1 inline-block text-xs font-medium text-accent hover:underline"
-                  >
-                    View {alert.competitor_site_name || alert.competitor_site_domain} →
-                  </Link>
+                  {alert.competitor_site_id != null ? (
+                    <Link
+                      href={`/discovery/${alert.competitor_site_id}`}
+                      className="mt-1 inline-block text-xs font-medium text-accent hover:underline"
+                    >
+                      View {alert.competitor_site_name || alert.competitor_site_domain} →
+                    </Link>
+                  ) : (
+                    alert.product_id != null && (
+                      <Link
+                        href={`/catalog?highlight=${alert.product_id}`}
+                        className="mt-1 inline-block text-xs font-medium text-accent hover:underline"
+                      >
+                        View {alert.product_name} →
+                      </Link>
+                    )
+                  )}
                 </div>
               </Card>
             ))}
@@ -473,6 +493,10 @@ export default function ReportDetailPage() {
               <li>
                 <span className="font-medium text-ink">New competitor product</span> — a saved competitor's
                 catalog gains products it didn't have at your previous report.
+              </li>
+              <li>
+                <span className="font-medium text-ink">Own price change</span> — one of your own product's
+                prices moves by 15% or more since your previous report.
               </li>
             </ul>
           </Card>
@@ -497,8 +521,9 @@ export default function ReportDetailPage() {
                     <Link href={`/catalog?highlight=${group.product_id}`} className="font-medium text-ink hover:text-accent">
                       {group.product_name}
                     </Link>
-                    <div className="text-xs tabular-nums text-slate-soft">
+                    <div className="flex items-center gap-1 text-xs tabular-nums text-slate-soft">
                       {group.product_currency} {group.product_price.toFixed(2)}
+                      <TrendIndicator trend={group.own_trend} />
                     </div>
                     {group.product_min_price != null && (
                       <div className="text-xs tabular-nums text-slate-soft" title="Minimum advertised price (MAP)">

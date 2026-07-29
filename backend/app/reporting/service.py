@@ -12,6 +12,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.catalog.models import Product, ProductSnapshot
 from app.discovery.models import CompetitorProductSnapshot
 from app.discovery.service import fetch_market_coverage, fetch_new_competitor_products, fetch_tracked_matches
 from app.reporting.metrics import group_comparison_rows
@@ -110,7 +111,82 @@ async def _compute_trend(
     }
 
 
-def _compute_comparison_row(match, product, cproduct, site, trend: Optional[dict]) -> dict:
+async def _compute_own_trend(
+    db: AsyncSession,
+    product_id: int,
+    previous_report: Optional[CompetitorReport],
+    current_price: float,
+) -> Optional[dict]:
+    """Same shape and reasoning as _compute_trend, mirrored for the
+    workspace's OWN product price instead of a competitor's — see
+    catalog/models.py's ProductSnapshot. Kept as its own function rather
+    than parameterizing _compute_trend: the two snapshot tables differ in
+    FK column name and timestamp field name, and duplicating a dozen
+    lines here reads more clearly than genericizing over that mismatch."""
+    if previous_report is None:
+        return None
+    result = await db.execute(
+        select(ProductSnapshot)
+        .where(
+            ProductSnapshot.product_id == product_id,
+            ProductSnapshot.recorded_at <= previous_report.generated_at,
+        )
+        .order_by(ProductSnapshot.recorded_at.desc())
+        .limit(1)
+    )
+    snapshot = result.scalars().first()
+    if snapshot is None:
+        return None
+    previous_price = float(snapshot.price)
+    if previous_price == 0:
+        return None
+    delta_pct = round(((current_price - previous_price) / previous_price) * 100, 1)
+    return {
+        "previous_price": previous_price,
+        "previous_checked_at": snapshot.recorded_at.isoformat(),
+        "direction": "up" if delta_pct > 0 else "down" if delta_pct < 0 else "same",
+        "delta_pct": delta_pct,
+        "is_anomaly": abs(delta_pct) >= PRICE_ANOMALY_THRESHOLD_PCT,
+    }
+
+
+async def _build_own_price_alerts(db: AsyncSession, workspace_id: int, previous_report: Optional[CompetitorReport]) -> list[dict]:
+    """Deterministic — one alert per own Product whose price has moved by
+    at least PRICE_ANOMALY_THRESHOLD_PCT since the previous report (same
+    threshold and reasoning as the competitor-side price_anomaly alert).
+    Covers the FULL catalog, not just matched products — a price change on
+    a product with zero competitor matches is exactly as real as one that
+    has some, and until now nothing in reporting ever looked at unmatched
+    products' prices at all. No previous report means no baseline —
+    correctly produces nothing on a first report."""
+    if previous_report is None:
+        return []
+    result = await db.execute(select(Product).where(Product.workspace_id == workspace_id))
+    alerts = []
+    for product in result.scalars().all():
+        trend = await _compute_own_trend(db, product.id, previous_report, float(product.price))
+        if trend and trend["is_anomaly"]:
+            direction_word = "raised" if trend["direction"] == "up" else "lowered"
+            alerts.append(
+                {
+                    "type": "own_price_change",
+                    "severity": "medium",
+                    "message": (
+                        f"You {direction_word} \"{product.name}\"'s price by {abs(trend['delta_pct']):.0f}% "
+                        f"since your last report ({product.currency} {trend['previous_price']:.2f} → "
+                        f"{product.currency} {float(product.price):.2f})."
+                    ),
+                    "product_id": product.id,
+                    "product_name": product.name,
+                    "product_price": float(product.price),
+                    "product_currency": product.currency,
+                    "trend": trend,
+                }
+            )
+    return alerts
+
+
+def _compute_comparison_row(match, product, cproduct, site, trend: Optional[dict], own_trend: Optional[dict]) -> dict:
     """Ports the exact same-currency-gated price-delta and MAP-violation
     determination frontend/app/(app)/tracked/page.tsx's priceDelta()/
     belowMap compute client-side — this is now the single Python source of
@@ -157,6 +233,7 @@ def _compute_comparison_row(match, product, cproduct, site, trend: Optional[dict
         "price_delta_pct": price_delta_pct,
         "below_map": below_map,
         "trend": trend,
+        "own_trend": own_trend,
     }
 
 
@@ -267,7 +344,8 @@ async def generate_report(db: AsyncSession, workspace: Workspace, trigger_source
     for match, product, cproduct, site in match_rows:
         competitor_price = float(cproduct.price) if cproduct.price is not None else None
         trend = await _compute_trend(db, cproduct.id, previous_report, competitor_price)
-        flat_rows.append(_compute_comparison_row(match, product, cproduct, site, trend))
+        own_trend = await _compute_own_trend(db, product.id, previous_report, float(product.price))
+        flat_rows.append(_compute_comparison_row(match, product, cproduct, site, trend, own_trend))
 
     alerts = _build_alerts(flat_rows)
     # No previous report means no "since when" baseline — a first report
@@ -276,6 +354,7 @@ async def generate_report(db: AsyncSession, workspace: Workspace, trigger_source
     if previous_report is not None:
         new_products = await fetch_new_competitor_products(db, workspace.id, previous_report.generated_at)
         alerts += _build_new_product_alerts(new_products)
+        alerts += await _build_own_price_alerts(db, workspace.id, previous_report)
     summary_stats = _build_summary_stats(flat_rows, alerts)
     price_comparison = group_comparison_rows(flat_rows)
 
