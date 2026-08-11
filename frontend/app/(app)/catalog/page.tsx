@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Package, Search, Trash2, X } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ExternalLink, Package, Search, Trash2, TrendingUp, X } from "lucide-react";
 
+import { DeleteAllProductsDialog } from "@/components/catalog/DeleteAllProductsDialog";
 import { ImportProductsDialog } from "@/components/catalog/ImportProductsDialog";
 import { ProductDialog } from "@/components/catalog/ProductDialog";
+import { WebsiteImportDialog } from "@/components/catalog/WebsiteImportDialog";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,12 +35,26 @@ export default function CatalogPage() {
   const [confirmingDelete, setConfirmingDelete] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
   const [highlightId, setHighlightId] = useState<number | null>(null);
+  // Confirmed-match count per product_id — a product row otherwise shows
+  // price/category/source but nothing about competitive tracking at all,
+  // the clearest "can't find everything" gap found in the nav audit.
+  // Computed client-side from the same workspace-wide list Tracked itself
+  // renders; no new backend endpoint needed.
+  const [trackedCounts, setTrackedCounts] = useState<Record<number, number>>({});
 
   const load = useCallback(() => {
     api.products
       .list()
       .then(setProducts)
       .catch(() => setError("Couldn't load your catalog. Try refreshing."));
+    api.discovery
+      .listTrackedMatches()
+      .then((matches) => {
+        const counts: Record<number, number> = {};
+        for (const m of matches) counts[m.product_id] = (counts[m.product_id] ?? 0) + 1;
+        setTrackedCounts(counts);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -73,14 +90,23 @@ export default function CatalogPage() {
       if (!query) return true;
       return [p.name, p.sku, p.brand, p.category].some((field) => field?.toLowerCase().includes(query));
     });
+    // Priceless products (no price set yet) always sort last regardless of
+    // direction — there's nothing to rank them by, not a reason to flip
+    // them to the top on descending sort.
+    const priceOrNull = (p: Product) => (p.price != null ? parseFloat(p.price) : null);
     list = [...list].sort((a, b) => {
       switch (sortKey) {
         case "name":
           return a.name.localeCompare(b.name);
         case "price_asc":
-          return parseFloat(a.price) - parseFloat(b.price);
-        case "price_desc":
-          return parseFloat(b.price) - parseFloat(a.price);
+        case "price_desc": {
+          const av = priceOrNull(a);
+          const bv = priceOrNull(b);
+          if (av == null && bv == null) return 0;
+          if (av == null) return 1;
+          if (bv == null) return -1;
+          return sortKey === "price_asc" ? av - bv : bv - av;
+        }
         case "category":
         default:
           return (a.category ?? "￿").localeCompare(b.category ?? "￿") || a.name.localeCompare(b.name);
@@ -109,6 +135,7 @@ export default function CatalogPage() {
         description={products ? `${products.length} product${products.length === 1 ? "" : "s"}` : "Loading…"}
         actions={
           <>
+            <WebsiteImportDialog onImported={load} />
             <ImportProductsDialog onImported={load} />
             <ProductDialog onSaved={load} />
           </>
@@ -135,6 +162,7 @@ export default function CatalogPage() {
               <option value="price_asc">Sort: Price low–high</option>
               <option value="price_desc">Sort: Price high–low</option>
             </Select>
+            <DeleteAllProductsDialog count={products.length} onDeleted={load} />
           </div>
 
           {categories.length > 1 && (
@@ -215,10 +243,40 @@ export default function CatalogPage() {
                         </div>
                       )}
                       <div className="min-w-0">
-                        <p className="truncate font-medium text-ink">{p.name}</p>
+                        {p.source_url ? (
+                          <a
+                            href={p.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={
+                              p.source_url_verified === false
+                                ? `Unconfirmed — may not be this product's exact page: ${p.source_url}`
+                                : `Open source page: ${p.source_url}`
+                            }
+                            className="group inline-flex max-w-full items-center gap-1 truncate font-medium text-ink hover:text-accent"
+                          >
+                            <span className="truncate">{p.name}</span>
+                            {p.source_url_verified === false ? (
+                              <AlertTriangle className="size-3 shrink-0 text-amber-500" />
+                            ) : (
+                              <ExternalLink className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                            )}
+                          </a>
+                        ) : (
+                          <p className="truncate font-medium text-ink">{p.name}</p>
+                        )}
                         <p className="mt-0.5 truncate text-xs text-slate">
                           {[p.brand, p.sku].filter(Boolean).join(" · ") || "—"}
                         </p>
+                        {trackedCounts[p.id] > 0 && (
+                          <Link
+                            href="/tracked"
+                            className="mt-0.5 inline-flex items-center gap-1 text-xs text-slate-soft hover:text-accent"
+                          >
+                            <TrendingUp className="size-3" />
+                            {trackedCounts[p.id]} competitor{trackedCounts[p.id] === 1 ? "" : "s"} tracked
+                          </Link>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -238,9 +296,13 @@ export default function CatalogPage() {
                     <span className="text-xs text-slate-soft">{SOURCE_LABEL[p.import_source] ?? p.import_source}</span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <span className="font-[family-name:var(--font-data)] text-sm tabular-nums text-ink">
-                      {p.currency} {p.price}
-                    </span>
+                    {p.price != null ? (
+                      <span className="font-[family-name:var(--font-data)] text-sm tabular-nums text-ink">
+                        {p.currency} {p.price}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-soft">No price set</span>
+                    )}
                     {p.min_price && (
                       <p className="font-[family-name:var(--font-data)] text-xs tabular-nums text-slate-soft" title="Minimum advertised price (MAP)">
                         MAP {p.currency} {p.min_price}

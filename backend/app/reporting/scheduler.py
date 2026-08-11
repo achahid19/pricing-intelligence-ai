@@ -2,14 +2,21 @@
 Single in-process background job that reads Workspace.report_interval_hours
 (set in Settings, previously never read by anything) and generates a report
 for every workspace that's due — the automation half of "so what should I
-do," on top of generate_report() the manual endpoint also calls.
+do," on top of generate_report() the manual endpoint also calls. Also the
+trigger point for Workspace.refresh_before_report: when set, the full
+automated pipeline (fresh competitor discovery, auto-saving ≥80% confidence;
+product discovery + auto-match for every saved site, auto-confirming ≥80%
+confidence matches) runs immediately before the report generates, so the
+report reflects current data rather than whatever was last manually
+discovered (see reporting_service.run_full_pipeline).
 
 Runs correctly for this app's current deployment shape: one backend
 replica, no --workers (see docker-compose.yml). If this ever scales
 horizontally, every replica would independently see the same workspace as
-"due" and fire a duplicate report/AI call — noted in docs/DECISIONS.md as a
-known limitation to revisit then (a DB-level claim, or moving the scheduler
-to one dedicated process), not solved here.
+"due" and fire a duplicate report/AI call (and, now, a duplicate pipeline
+pass too) — noted in docs/DECISIONS.md as a known limitation to revisit
+then (a DB-level claim, or moving the scheduler to one dedicated process),
+not solved here.
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -39,7 +46,10 @@ async def _maybe_generate_for_workspace(db, workspace: Workspace) -> None:
             return
 
     try:
-        await reporting_service.generate_report(db, workspace, trigger_source="scheduled")
+        if workspace.refresh_before_report:
+            await reporting_service.run_full_pipeline(db, workspace, trigger_source="scheduled")
+        else:
+            await reporting_service.generate_report(db, workspace, trigger_source="scheduled")
     except reporting_service.NoTrackedMatchesError:
         logger.info("Skipping scheduled report for workspace %s: no trackable confirmed matches yet", workspace.id)
     except ai_client.NoActiveProviderError:

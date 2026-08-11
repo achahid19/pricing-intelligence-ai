@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +40,22 @@ async def update_my_workspace(
 ):
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(workspace, field, value)
+    await db.commit()
+    await db.refresh(workspace)
+    return workspace
+
+
+@router.post("/product-tour-complete", response_model=WorkspaceOut)
+async def complete_product_tour(
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Marks the interactive first-run tour as seen — called on finishing
+    the last step OR explicitly skipping (both count; see frontend/lib/
+    productTour.tsx). The timestamp is server-set, not client-sent, same
+    reasoning as every other one-shot flag on this model. Idempotent: a
+    second call just overwrites with a fresher timestamp, no error."""
+    workspace.product_tour_completed_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(workspace)
     return workspace

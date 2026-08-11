@@ -233,7 +233,7 @@ def _price_comparison_section(groups: list[dict], s: dict, content_width: float)
 
     header = [
         Paragraph("Product", s["thead"]),
-        Paragraph("Ranking", s["thead"]),
+        Paragraph("Price standing", s["thead"]),
         Paragraph("Cheapest competitor", s["thead"]),
         Paragraph("Tracked competitors", s["thead"]),
     ]
@@ -250,10 +250,13 @@ def _price_comparison_section(groups: list[dict], s: dict, content_width: float)
         if group.get("product_min_price") is not None:
             name_cell.append(Paragraph(f'MAP {_fmt_money(group["product_min_price"], group["product_currency"])}', s["cell_soft"]))
 
-        if m["price_rank"] is not None:
-            rank_text = f'Rank #{m["price_rank"]} of {m["same_currency_competitors_count"] + 1}'
-            index_text = f'Index {m["price_index"]}'
-            rank_cell = [Paragraph(rank_text, s["cell"]), Paragraph(index_text, s["cell_soft"])]
+        # Plain-language sentence only — no raw rank/index numbers printed
+        # here. This is the artifact meant to be printed/forwarded to
+        # management, so it stays the cleanest version; the raw numbers
+        # are still in the data (ProductMetrics.price_rank/price_index),
+        # just not surfaced as a labeled statistic anywhere in the PDF.
+        if m["price_position_summary"] is not None:
+            rank_cell = [Paragraph(m["price_position_summary"], s["cell"])]
         else:
             rank_cell = [Paragraph("No same-currency data", s["cell_soft"])]
 
@@ -391,16 +394,28 @@ def build_report_pdf(report: CompetitorReport, workspace: Workspace) -> bytes:
     story: list = []
     story += _header(report, workspace, s)
     story.append(_kpi_row(content["summary_stats"], s, content_width))
+    story.append(
+        Paragraph(
+            "Price increases/decreases measure competitor price moves since your previous report, "
+            "not how your price compares to theirs today.",
+            s["small"],
+        )
+    )
     story.append(Spacer(1, 18))
+    # Executive summary, market position, and recommendations first — the
+    # "so what do I do" sections, read straight through a printed/forwarded
+    # PDF with no clicking around — before the supporting detail (alerts,
+    # the full price-comparison table, the full market-coverage catalog).
     story += _narrative_section("Executive summary", content.get("executive_summary"), s)
     story += _narrative_section("Market position", content.get("market_position"), s)
+    story += _recommendations_section(content.get("recommendations", []), s)
+    story.append(Spacer(1, 6))
     story += _alerts_section(content.get("alerts", []), s, content_width)
     story.append(Spacer(1, 6))
     story += _price_comparison_section(content.get("price_comparison", []), s, content_width)
     story += _market_coverage_section(
         content.get("market_coverage", {}), content.get("competitive_gaps"), s, content_width
     )
-    story += _recommendations_section(content.get("recommendations", []), s)
 
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return buffer.getvalue()

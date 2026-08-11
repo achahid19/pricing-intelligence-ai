@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, FileText, Package, Search, Settings, ShieldCheck, TrendingUp } from "lucide-react";
 
+import { AiProviderRequiredNotice } from "@/components/ui/ai-provider-notice";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Card, cardClassName } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { useAiProviderStatus } from "@/lib/aiProvider";
 import { cn } from "@/lib/utils";
 import { api, type CompetitorReport, type CompetitorSite, type DiscoveryRun, type Product, type TrackedMatch } from "@/lib/api";
 
@@ -65,6 +67,7 @@ function QuickActionLink({
 }
 
 export default function Home() {
+  const { hasActiveProvider } = useAiProviderStatus();
   const [products, setProducts] = useState<Product[] | null>(null);
   const [savedSites, setSavedSites] = useState<CompetitorSite[] | null>(null);
   const [runs, setRuns] = useState<DiscoveryRun[] | null>(null);
@@ -87,6 +90,12 @@ export default function Home() {
     <div className="mx-auto max-w-4xl px-8 py-10">
       <PageHeader title="Welcome back" description="Here's where things stand across your catalog and competitor research." />
 
+      {hasActiveProvider === false && (
+        <div className="mt-6">
+          <AiProviderRequiredNotice action="Competitor discovery, matching, and AI-written reports" />
+        </div>
+      )}
+
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard
           icon={Package}
@@ -96,7 +105,7 @@ export default function Home() {
         />
         <StatCard
           icon={ShieldCheck}
-          label="Competitors"
+          label="Saved competitors"
           value={savedSites ? String(savedSites.length) : "…"}
           hint={savedSites && savedSites.length === 0 ? "None saved yet" : "saved for tracking"}
         />

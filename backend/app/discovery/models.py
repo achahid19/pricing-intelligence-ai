@@ -99,14 +99,12 @@ class CompetitorSite(Base):
 class CompetitorProduct(Base):
     """
     A product observed on a saved competitor's site via
-    ai_client.discover_competitor_products(). Unlike CompetitorSite, there's
-    no candidate/saved/dismissed review status here — these are just
-    observed facts to browse and match against, not proposals to accept or
-    reject. workspace_id is denormalized for the same reason as
-    CompetitorSite: simple per-workspace queries without joining through
-    the site. Re-running discovery upserts by (competitor_site_id, url)
-    rather than duplicating, and never deletes rows no longer found — a
-    product temporarily unlisted isn't necessarily discontinued.
+    ai_client.discover_competitor_products(). workspace_id is denormalized
+    for the same reason as CompetitorSite: simple per-workspace queries
+    without joining through the site. Re-running discovery upserts by
+    (competitor_site_id, url) rather than duplicating, and never deletes
+    rows no longer found — a product temporarily unlisted isn't necessarily
+    discontinued.
     """
     __tablename__ = "competitor_products"
 
@@ -135,6 +133,19 @@ class CompetitorProduct(Base):
     # Derived (price is not None), not user-editable — some listings are
     # "contact for quote"/spec-only with no price to track at all.
     is_trackable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # True when `url` is actually confirmed real — either cited by the AI
+    # provider's own web search tool (ai_client._url_is_cited), or, when
+    # citation coverage was sparse (common for a JSON-only prompt), a real
+    # HTTP reachability check (app/services/url_check.py). Surfaced in the
+    # UI so an unconfirmed link isn't shown with the same false confidence
+    # as a verified one — see discovery/router.py's discover_products_for_site.
+    is_url_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # User marked "not interested" — excluded from matching, market
+    # coverage, and reports (see discovery/service.py), and left alone by
+    # future discovery re-runs (upsert never touches this flag). Distinct
+    # from a hard delete: the row and its price history stay, so restoring
+    # it is a single flip, not a re-discover.
+    is_dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     discovered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

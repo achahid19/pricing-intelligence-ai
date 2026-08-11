@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, ExternalLink, Package, Plus, Search, Sparkles, X } from "lucide-react";
+import { Check, ExternalLink, Package, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, cardClassName } from "@/components/ui/card";
@@ -12,7 +12,10 @@ import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
+import { AiProviderRequiredNotice } from "@/components/ui/ai-provider-notice";
 import { api, ApiError, type CompetitorSite, type DiscoveryMode, type DiscoveryRun } from "@/lib/api";
+import { useActivity } from "@/lib/activity";
+import { useAiProviderStatus } from "@/lib/aiProvider";
 import { usePersistedTab } from "@/lib/usePersistedTab";
 import { cn } from "@/lib/utils";
 
@@ -28,12 +31,22 @@ function SiteCard({
   updating,
   selected,
   onToggleSelect,
+  onDelete,
+  confirmingDelete,
+  deleting,
+  onStartDelete,
+  onCancelDelete,
 }: {
   site: CompetitorSite;
   onUpdate: (id: number, status: "candidate" | "saved" | "dismissed") => void;
   updating: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
+  onDelete?: (id: number) => void;
+  confirmingDelete?: boolean;
+  deleting?: boolean;
+  onStartDelete?: (id: number) => void;
+  onCancelDelete?: () => void;
 }) {
   return (
     <Card>
@@ -106,14 +119,45 @@ function SiteCard({
               </button>
             </>
           )}
-          {site.status === "dismissed" && (
-            <button
-              onClick={() => onUpdate(site.id, "candidate")}
-              disabled={updating}
-              className="rounded-md px-2 py-1 text-xs font-medium text-slate transition-colors hover:bg-black/[0.03] hover:text-ink"
-            >
-              Restore
-            </button>
+          {site.status === "dismissed" && !confirmingDelete && (
+            <>
+              <button
+                onClick={() => onUpdate(site.id, "candidate")}
+                disabled={updating}
+                className="rounded-md px-2 py-1 text-xs font-medium text-slate transition-colors hover:bg-black/[0.03] hover:text-ink"
+              >
+                Restore
+              </button>
+              {onStartDelete && (
+                <button
+                  onClick={() => onStartDelete(site.id)}
+                  disabled={updating || deleting}
+                  aria-label="Delete competitor"
+                  className="rounded-md p-1.5 text-slate-soft transition-colors hover:bg-danger/10 hover:text-danger"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              )}
+            </>
+          )}
+          {site.status === "dismissed" && confirmingDelete && (
+            <>
+              <button
+                onClick={() => onDelete?.(site.id)}
+                disabled={deleting}
+                className="rounded-md px-2 py-1 text-xs font-medium text-danger transition-colors hover:bg-danger/10"
+              >
+                {deleting ? "Deleting…" : "Confirm"}
+              </button>
+              <button
+                onClick={onCancelDelete}
+                disabled={deleting}
+                aria-label="Cancel delete"
+                className="rounded-md p-1.5 text-slate-soft transition-colors hover:bg-black/[0.03] hover:text-ink"
+              >
+                <X className="size-4" />
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -201,6 +245,13 @@ export default function DiscoveryPage() {
   const [maxCandidates, setMaxCandidates] = useState(10);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmingDeleteAllDismissed, setConfirmingDeleteAllDismissed] = useState(false);
+  const [deletingAllDismissed, setDeletingAllDismissed] = useState(false);
+  const [discoveringAllProducts, setDiscoveringAllProducts] = useState(false);
+  const { track } = useActivity();
+  const { hasActiveProvider } = useAiProviderStatus();
 
   // The reseller-tracking mode only makes sense for workspaces that
   // actually monitor MAP compliance — hidden entirely otherwise, so this
@@ -246,7 +297,12 @@ export default function DiscoveryPage() {
     setLastRunNote(null);
     setRunning(true);
     try {
-      const run = await api.discovery.createRun(maxCandidates, mode);
+      const run = await track(
+        `discovery-run-${mode}`,
+        mode === "reseller" ? "Reseller discovery" : "Competitor discovery",
+        api.discovery.createRun(maxCandidates, mode),
+        { href: "/discovery" }
+      );
       if (run.skipped_known_count) {
         const noun = mode === "reseller" ? "reseller" : "competitor";
         setLastRunNote(
@@ -295,6 +351,55 @@ export default function DiscoveryPage() {
     }
   }
 
+  async function handleDiscoverAllProducts() {
+    if (!savedSites || savedSites.length === 0) return;
+    setError(null);
+    setDiscoveringAllProducts(true);
+    const sites = savedSites;
+    try {
+      const results = await track(
+        "discover-all-products",
+        `Discover products — ${sites.length} competitor${sites.length === 1 ? "" : "s"}`,
+        Promise.allSettled(sites.map((site) => api.discovery.discoverProducts(site.id, 15))),
+        { href: "/discovery" }
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed > 0) {
+        setError(`${sites.length - failed} of ${sites.length} succeeded — ${failed} couldn't run right now (likely still in cooldown). Try those again in a bit.`);
+      }
+    } finally {
+      setDiscoveringAllProducts(false);
+    }
+  }
+
+  async function handleDeleteSite(id: number) {
+    setDeletingId(id);
+    try {
+      await api.discovery.deleteSite(id);
+      setConfirmingDeleteId(null);
+      setDismissedSites((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't delete that competitor. Try again.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function handleDeleteAllDismissed() {
+    if (!dismissedSites || dismissedSites.length === 0) return;
+    setDeletingAllDismissed(true);
+    try {
+      await Promise.all(dismissedSites.map((s) => api.discovery.deleteSite(s.id)));
+      setConfirmingDeleteAllDismissed(false);
+      setDismissedSites([]);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't delete those competitors. Try again.");
+      load();
+    } finally {
+      setDeletingAllDismissed(false);
+    }
+  }
+
   const latestRun = runs?.[0];
   const allCandidatesSelected = !!candidates && candidates.length > 0 && candidates.every((c) => selectedIds.has(c.id));
 
@@ -329,13 +434,19 @@ export default function DiscoveryPage() {
                 className="w-20"
               />
             </div>
-            <Button onClick={handleRun} disabled={running}>
+            <Button onClick={handleRun} disabled={running || hasActiveProvider === false}>
               <Sparkles className="size-4" />
               {running ? "Researching…" : mode === "reseller" ? "Run reseller discovery" : "Run discovery"}
             </Button>
           </>
         }
       />
+
+      {hasActiveProvider === false && (
+        <div className="mt-4">
+          <AiProviderRequiredNotice action="Discovery" />
+        </div>
+      )}
 
       {showResellerMode && (
         <div className="mt-4 inline-flex rounded-md border border-border bg-paper-raised p-1">
@@ -479,6 +590,19 @@ export default function DiscoveryPage() {
           <div className="mt-2">
             <AddCompetitorForm onAdded={load} relationshipType={mode} />
           </div>
+          {savedSites && savedSites.length > 0 && (
+            <div className="mt-3 flex items-center justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={discoveringAllProducts || hasActiveProvider === false}
+                onClick={handleDiscoverAllProducts}
+              >
+                <Sparkles className="size-3.5" />
+                {discoveringAllProducts ? "Discovering…" : `Discover products for all (${savedSites.length})`}
+              </Button>
+            </div>
+          )}
           {savedSites && savedSites.length > 0 ? (
             <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
               {savedSites.map((site) => (
@@ -495,13 +619,59 @@ export default function DiscoveryPage() {
         <div className="mt-4">
           {dismissedSites && dismissedSites.length > 0 ? (
             <>
-              <p className="text-xs text-slate-soft">
-                A dismissed {mode === "reseller" ? "reseller" : "competitor"} is never re-suggested by discovery —
-                restore one here if you want it back.
-              </p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-slate-soft">
+                  A dismissed {mode === "reseller" ? "reseller" : "competitor"} is never re-suggested by discovery —
+                  restore one here if you want it back, or delete it for good.
+                </p>
+                {confirmingDeleteAllDismissed ? (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-xs text-slate-soft">
+                      Delete all {dismissedSites.length}?
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={deletingAllDismissed}
+                      onClick={handleDeleteAllDismissed}
+                      className="text-danger"
+                    >
+                      {deletingAllDismissed ? "Deleting…" : "Confirm"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={deletingAllDismissed}
+                      onClick={() => setConfirmingDeleteAllDismissed(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => setConfirmingDeleteAllDismissed(true)}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete all
+                  </Button>
+                )}
+              </div>
               <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {dismissedSites.map((site) => (
-                  <SiteCard key={site.id} site={site} onUpdate={handleUpdate} updating={updatingId === site.id} />
+                  <SiteCard
+                    key={site.id}
+                    site={site}
+                    onUpdate={handleUpdate}
+                    updating={updatingId === site.id}
+                    onDelete={handleDeleteSite}
+                    confirmingDelete={confirmingDeleteId === site.id}
+                    deleting={deletingId === site.id}
+                    onStartDelete={setConfirmingDeleteId}
+                    onCancelDelete={() => setConfirmingDeleteId(null)}
+                  />
                 ))}
               </div>
             </>

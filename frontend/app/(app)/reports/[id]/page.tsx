@@ -92,7 +92,14 @@ function StatTile({
   );
 }
 
-function MetricsBadges({
+// Plain-English price standing — the primary read for a management report.
+// Raw rank/index numbers stay available (for anyone who wants the exact
+// figures) only via the InfoTooltip, and even there the wording never uses
+// the word "index" — the tooltip adds new information (the exact rank/
+// count) rather than restating the headline sentence's percentage a second
+// time. Not a <Badge>: a ~55-character sentence doesn't fit the pill
+// styling used elsewhere in this app for 1-4 word tags.
+function PricePosition({
   metrics,
   productPrice,
   productCurrency,
@@ -101,17 +108,19 @@ function MetricsBadges({
   productPrice: number;
   productCurrency: string;
 }) {
-  if (metrics.price_rank == null) {
+  if (metrics.price_rank == null || metrics.price_position_summary == null) {
     return <Badge tone="neutral">No same-currency data</Badge>;
   }
   // Derived, not a new backend field: price_index = product_price / marketAvg * 100.
   const marketAvg = metrics.price_index ? (productPrice / metrics.price_index) * 100 : null;
   return (
     <div className="flex flex-col items-start gap-1">
-      <Badge tone="accent">
-        Rank #{metrics.price_rank} of {metrics.same_currency_competitors_count + 1}
-      </Badge>
-      <Badge tone="neutral">Index {metrics.price_index}</Badge>
+      <span className="inline-flex items-center gap-1 text-sm font-medium text-ink">
+        {metrics.price_position_summary}
+        <InfoTooltip
+          text={`#${metrics.price_rank} of ${metrics.same_currency_competitors_count + 1} tracked sellers, ranked by price (same currency only).`}
+        />
+      </span>
       {marketAvg != null && (
         <span className="text-xs text-slate-soft">
           Avg {productCurrency} {marketAvg.toFixed(2)} · {metrics.sellers_cheaper}/{metrics.same_currency_competitors_count} cheaper
@@ -434,10 +443,24 @@ export default function ReportDetailPage() {
       {deleteError && <p className="mt-4 text-sm text-danger">{deleteError}</p>}
       {actionError && <p className="mt-4 text-sm text-danger">{actionError}</p>}
 
+      {/* The narrative sections below routinely say "since the previous
+          report" in prose (see market_position/executive_summary) without
+          ever linking to it — fed_forward_from_report_id already exists on
+          every report specifically to make that connection, just never
+          rendered anywhere until now. */}
+      {report.fed_forward_from_report_id != null && (
+        <Link
+          href={`/reports/${report.fed_forward_from_report_id}`}
+          className="mt-4 inline-block text-sm text-accent hover:underline"
+        >
+          Compared against the previous report →
+        </Link>
+      )}
+
       {/* At-a-glance KPIs so a manager can read the headline numbers without
           scrolling into any section's detail. */}
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile icon={Link2} label="Matches tracked" value={stats.matches_tracked} />
+        <StatTile icon={Link2} label="Confirmed matches" value={stats.matches_tracked} />
         <StatTile icon={AlertTriangle} label="Alerts" value={stats.alerts_count} tone={stats.alerts_count > 0 ? "danger" : undefined} />
         <StatTile
           icon={TrendingUp}
@@ -595,7 +618,7 @@ export default function ReportDetailPage() {
             <thead className="border-b border-border bg-black/[0.02] text-left text-xs font-medium uppercase tracking-wide text-slate-soft">
               <tr>
                 <th className="px-3 py-2 font-medium">Product</th>
-                <th className="px-3 py-2 font-medium">Ranking</th>
+                <th className="px-3 py-2 font-medium">Price standing</th>
                 <th className="px-3 py-2 font-medium">Cheapest competitor</th>
                 <th className="px-3 py-2 font-medium">Tracked competitors</th>
               </tr>
@@ -618,7 +641,7 @@ export default function ReportDetailPage() {
                     )}
                   </td>
                   <td className="px-3 py-3">
-                    <MetricsBadges metrics={group.metrics} productPrice={group.product_price} productCurrency={group.product_currency} />
+                    <PricePosition metrics={group.metrics} productPrice={group.product_price} productCurrency={group.product_currency} />
                   </td>
                   <td className="px-3 py-3">
                     {group.metrics.cheapest_competitor_name ? (

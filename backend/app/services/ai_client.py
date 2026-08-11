@@ -8,14 +8,26 @@ workspace instead of a single global setting.
 """
 import base64
 import json
+import re
 from typing import Optional
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.model_catalog import default_model_for
 from app.workspace.encryption import decrypt_key
 from app.workspace.models import AiProviderConfig
+
+# The openai SDK's own default (httpx.Timeout(600.0, connect=5.0)) leaves
+# only 5s to establish the connection itself — confirmed too tight live
+# (2026-08-10): a real web-search discovery call for a workspace on
+# gpt-5.6-luna failed twice in one session with httpx.ConnectTimeout
+# despite the SDK's built-in 2 retries, before a manual re-run succeeded
+# moments later against the exact same network path. Applied to every
+# AsyncOpenAI client below, not just the one that failed — the same
+# container network path serves all of them.
+_OPENAI_TIMEOUT = httpx.Timeout(600.0, connect=20.0)
 
 _DESCRIBE_PROMPT = (
     "You're looking at a photo of a single product being entered into a market-research "
@@ -73,6 +85,43 @@ def _extract_json_object(text: str) -> dict:
     return json.loads(text[start : end + 1])
 
 
+def _normalize_url_for_match(url: str) -> str:
+    """Strip scheme/www./trailing slash so equivalent forms of the same URL
+    ("https://www.site.com/x/" vs "site.com/x") compare equal — used only
+    for the citation cross-check below, not for storage."""
+    normalized = url.strip().lower()
+    normalized = re.sub(r"^https?://", "", normalized)
+    normalized = normalized.removeprefix("www.")
+    return normalized.rstrip("/")
+
+
+def _url_is_cited(url: Optional[str], citation_urls: set[str]) -> bool:
+    """True if `url` (the model's own free-text JSON field) actually
+    matches one of the search tool's real, tool-verified citation_urls —
+    see _run_web_search_prompt. Exact match always counts; a prefix match
+    in either direction also counts (tolerates the model appending a query
+    param/fragment, or citing a broader listing page than the exact one it
+    wrote), but ONLY against a citation that itself has a path beyond the
+    bare domain. Without that guard, a citation that's just the homepage
+    (very common — it's often the page the search tool actually opened)
+    would trivially "contain" every URL on the whole site as a substring,
+    falsely verifying any fabricated deep path the model invented."""
+    if not url:
+        return False
+    normalized = _normalize_url_for_match(url)
+    if not normalized:
+        return False
+    for raw_citation in citation_urls:
+        citation = _normalize_url_for_match(raw_citation)
+        if not citation:
+            continue
+        if normalized == citation:
+            return True
+        if "/" in citation and (normalized.startswith(citation) or citation.startswith(normalized)):
+            return True
+    return False
+
+
 async def describe_product_image(
     db: AsyncSession, workspace_id: int, image_bytes: bytes, content_type: str
 ) -> dict:
@@ -86,7 +135,7 @@ async def describe_product_image(
     if config.provider == "openai":
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(api_key=api_key)
+        client = AsyncOpenAI(api_key=api_key, timeout=_OPENAI_TIMEOUT)
         resp = await client.chat.completions.create(
             model=model,
             messages=[
@@ -214,7 +263,7 @@ def build_discovery_context(workspace, products: list) -> str:
     if categories:
         lines.append(f"Product categories sold: {', '.join(categories)}")
 
-    prices = [float(p.price) for p in products]
+    prices = [float(p.price) for p in products if p.price is not None]
     if prices:
         lines.append(f"Price range: {min(prices):.2f}-{max(prices):.2f} {products[0].currency}")
 
@@ -252,15 +301,25 @@ def build_discovery_context(workspace, products: list) -> str:
 
 async def _run_web_search_prompt(
     db: AsyncSession, workspace_id: int, prompt: str, max_results: int
-) -> tuple[dict, Optional[int]]:
+) -> tuple[dict, Optional[int], set[str]]:
     """Shared per-provider native-web-search dispatch — the same call
     shape used by discover_competitor_sites(), discover_reseller_sites(),
     and discover_competitor_products(); only the prompt text differs
     between them, so the provider plumbing lives here once instead of
-    being duplicated a third time. Returns (parsed_json, search_count) —
-    search_count is a best-effort usage figure for the lightweight
-    cost-transparency note, None where the provider's response doesn't
-    expose one. Raises NoActiveProviderError if none configured."""
+    being duplicated a third time. Returns (parsed_json, search_count,
+    citation_urls) — search_count is a best-effort usage figure for the
+    lightweight cost-transparency note, None where the provider's response
+    doesn't expose one. citation_urls is the set of URLs the provider's web
+    search tool actually visited/cited (real, tool-verified — NOT the same
+    as whatever URL string the model writes into its own JSON output,
+    which can be an inferred/guessed URL that was never actually fetched).
+    Every provider exposes this on the same response used for search_count
+    (OpenAI: output_text annotations' url_citation entries; Anthropic: text
+    blocks' citations; Google: grounding_metadata.grounding_chunks[].web),
+    confirmed against each provider's currently-installed SDK types before
+    writing this — see discover_competitor_products() for how callers use
+    it to flag whether a reported product URL is actually trustworthy.
+    Raises NoActiveProviderError if none configured."""
     config = await _get_active_config(db, workspace_id)
     api_key = decrypt_key(config.encrypted_api_key)
     model = config.model_override or default_model_for(config.provider)
@@ -268,14 +327,22 @@ async def _run_web_search_prompt(
     if config.provider == "openai":
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(api_key=api_key)
+        client = AsyncOpenAI(api_key=api_key, timeout=_OPENAI_TIMEOUT)
         resp = await client.responses.create(
             model=model,
             tools=[{"type": "web_search"}],
             input=prompt,
         )
         search_count = sum(1 for item in resp.output if getattr(item, "type", None) == "web_search_call")
-        return _extract_json_object(resp.output_text), search_count or None
+        citation_urls: set[str] = set()
+        for item in resp.output:
+            if getattr(item, "type", None) != "message":
+                continue
+            for block in getattr(item, "content", None) or []:
+                for annotation in getattr(block, "annotations", None) or []:
+                    if getattr(annotation, "type", None) == "url_citation" and getattr(annotation, "url", None):
+                        citation_urls.add(annotation.url)
+        return _extract_json_object(resp.output_text), search_count or None, citation_urls
 
     if config.provider == "anthropic":
         from anthropic import AsyncAnthropic
@@ -292,7 +359,15 @@ async def _run_web_search_prompt(
         server_tool_use = getattr(resp.usage, "server_tool_use", None)
         if server_tool_use is not None:
             search_count = getattr(server_tool_use, "web_search_requests", None)
-        return _extract_json_object(text), search_count
+        citation_urls = set()
+        for block in resp.content:
+            if getattr(block, "type", None) != "text":
+                continue
+            for citation in getattr(block, "citations", None) or []:
+                url = getattr(citation, "url", None)
+                if url:
+                    citation_urls.add(url)
+        return _extract_json_object(text), search_count, citation_urls
 
     if config.provider == "google":
         from google import genai
@@ -311,11 +386,17 @@ async def _run_web_search_prompt(
         resp = await client.aio.models.generate_content(model=model, contents=[prompt], config=gen_config)
         search_count = None
         grounding_metadata = getattr(resp.candidates[0], "grounding_metadata", None) if resp.candidates else None
+        citation_urls = set()
         if grounding_metadata is not None:
             queries = getattr(grounding_metadata, "web_search_queries", None)
             if queries is not None:
                 search_count = len(queries)
-        return _extract_json_object(resp.text), search_count
+            for chunk in getattr(grounding_metadata, "grounding_chunks", None) or []:
+                web = getattr(chunk, "web", None)
+                uri = getattr(web, "uri", None) if web else None
+                if uri:
+                    citation_urls.add(uri)
+        return _extract_json_object(resp.text), search_count, citation_urls
 
     raise ValueError(f"Unknown provider: {config.provider}")
 
@@ -326,9 +407,12 @@ async def discover_competitor_sites(
     """Ask the workspace's active AI provider to research and propose
     competitor businesses via its native web search tool. See
     _run_web_search_prompt for the (parsed_json, search_count) return
-    shape and NoActiveProviderError behavior."""
+    shape and NoActiveProviderError behavior. Citation URLs aren't used
+    here — sites are reported as a bare domain, not a specific page, so
+    there's no per-candidate URL to cross-check."""
     prompt = _DISCOVER_PROMPT_TEMPLATE.format(context=business_context, max_candidates=max_candidates)
-    return await _run_web_search_prompt(db, workspace_id, prompt, max_candidates)
+    result, search_count, _citation_urls = await _run_web_search_prompt(db, workspace_id, prompt, max_candidates)
+    return result, search_count
 
 
 _DISCOVER_RESELLERS_PROMPT_TEMPLATE = (
@@ -373,14 +457,20 @@ async def discover_reseller_sites(
     than finding your competitors. See _run_web_search_prompt for the
     return shape and NoActiveProviderError behavior."""
     prompt = _DISCOVER_RESELLERS_PROMPT_TEMPLATE.format(context=business_context, max_candidates=max_candidates)
-    return await _run_web_search_prompt(db, workspace_id, prompt, max_candidates)
+    result, search_count, _citation_urls = await _run_web_search_prompt(db, workspace_id, prompt, max_candidates)
+    return result, search_count
 
 
-# Two different intros, same as the site-discovery templates above — a
-# reseller site isn't a rival with its own catalog to browse generically,
-# it's a channel carrying THIS business's own products, so the AI needs to
-# be told that or it has no reason to focus on the relevant listings rather
-# than the reseller's entire (often huge, unrelated) inventory.
+# Three intros: a reseller site isn't a rival with its own catalog to
+# browse generically, it's a channel carrying THIS business's own products,
+# so the AI needs to be told that or it has no reason to focus on the
+# relevant listings rather than the reseller's entire (often huge,
+# unrelated) inventory. "own" is a third variant (not a competitor or
+# reseller relationship at all) for the workspace scanning ITS OWN site to
+# populate its catalog — see catalog/router.py's website-import endpoints,
+# which reuse this exact dispatch rather than a separate scraping pipeline
+# (see docs/PROGRESS.md for why: a prior standalone scraper was tried and
+# reverted as too complex to maintain).
 _DISCOVER_PRODUCTS_INTRO = {
     "competitor": (
         "You are researching real products currently offered by {label}, a known competitor "
@@ -398,6 +488,13 @@ _DISCOVER_PRODUCTS_INTRO = {
         "this site's relevant product and pricing pages in detail — not just the homepage or a "
         "single search snippet."
     ),
+    "own": (
+        "You are cataloging real products currently listed on {label}, which is THIS business's "
+        "own website, using web search — not guessing from memory or training data. The goal is "
+        "a complete, accurate product catalog for this business's own records, not competitive "
+        "research. Use your web search tool to actually browse this site's product, shop, and "
+        "pricing pages in detail — not just the homepage or a single search snippet."
+    ),
 }
 
 
@@ -408,22 +505,46 @@ _DISCOVER_PRODUCTS_PROMPT_TEMPLATE = (
     "tiers on a single page (a pricing table with multiple plans, a category page listing "
     "several items) — when you find a page like that, extract EACH distinct product or plan "
     "as its own separate entry. Never collapse multiple offerings into one combined entry "
-    "just because they appeared on the same page. Use the most specific URL available for "
-    "each one (its own page if it has one, otherwise the listing/pricing page it came from).\n\n"
+    "just because they appeared on the same page.\n\n"
+    "URL accuracy matters as much as everything else here. For EACH distinct product, "
+    "actively search for and use THAT product's own dedicated page — most real businesses "
+    "give each model/plan/product its own URL (e.g. a car manufacturer almost always has a "
+    "separate page per model with its own configurator/spec sheet; a SaaS or hosting site "
+    "usually has one per plan or product line). Do not default to a shared category or "
+    "listing page just because it's convenient, or because that's simply where you first "
+    "saw the product mentioned — that is a real, common failure mode to avoid: reusing one "
+    "generic listing URL across many different products makes it impossible to verify any "
+    "of them individually. Only fall back to a shared/listing URL as a genuine last resort, "
+    "after you've actually tried to find that specific product's own page via search and "
+    "concluded it doesn't have one.\n\n"
     "For each product, capture whatever you actually found on the page:\n"
-    "- name and a factual 1-2 sentence description\n"
+    "- name and a thorough, detailed, factual description — NOT a one- or two-sentence "
+    "summary, and NOT vague marketing prose. Actively look for and include every concrete, "
+    "quantified spec the page states, in the vocabulary that category actually uses — for "
+    "example: a vehicle needs engine power (e.g. 200 hp/ch), fuel type (diesel/petrol/"
+    "electric/hybrid), engine displacement (e.g. 2.0L), transmission, drivetrain, seats/"
+    "doors, range or battery capacity if electric; a physical product needs materials, "
+    "dimensions, weight, capacity; a software/hosting plan needs storage, bandwidth, user/"
+    "seat limits, included features. Beyond specs, also include what the product actually "
+    "is, what's included, and who it's for or what it's used for — everything relevant "
+    "actually found on the page. Write as much as the page genuinely supports — a page with "
+    "a full spec sheet or write-up should produce a full description, not a compressed "
+    "summary; only keep it short if the page itself truly has little to say. Never pad with "
+    "generic filler or invent a spec that isn't actually on the page — only include real, "
+    "specific detail you actually found.\n"
     "- price and currency, if shown\n"
     "- stock or availability, if the page indicates it (e.g. \"in stock\", \"sold out\", "
     "\"limited availability\", \"pre-order\") — null if the page doesn't show this\n"
-    "- any other specifics worth noting (specs, capacity, contract length, included "
-    "features, setup fees, etc.) as a short free-text note — null if there's nothing beyond "
-    "the description\n\n"
+    "- any other specifics worth noting separately from the description (contract length, "
+    "setup fees, terms, variants/options, etc.) as a free-text note — null if there's "
+    "nothing beyond the description\n\n"
     "Respond with ONLY a JSON object, no markdown fences, no commentary before or after: "
     '{{"products": [{{"title": "<product name>", '
     '"price": <numeric price only, no currency symbol, or null if you could not find one>, '
     '"currency": "<3-letter currency code if determinable, else null>", '
     '"url": "<the specific product page URL you found this on>", '
-    '"description": "<a factual 1-2 sentence description>", '
+    '"description": "<a thorough, detailed, factual description based on everything found '
+    'on the page — not compressed to 1-2 sentences>", '
     '"stock_status": "<a short availability note if the page shows one, else null>", '
     '"additional_info": "<other useful specifics actually found on the page, else null>"}}]}}'
 )
@@ -437,12 +558,13 @@ async def discover_competitor_products(
     max_products: int = 15,
     relationship_type: str = "competitor",
 ) -> tuple[dict, Optional[int]]:
-    """Ask the workspace's active AI provider to browse a specific saved
-    competitor or reseller site (via its native web search tool) and list
-    real products found there. relationship_type selects which intro frames
-    the request — a reseller site needs to be told it's specifically
-    carrying the workspace's own products (see _DISCOVER_PRODUCTS_INTRO),
-    not treated like a rival's generic catalog. Same dispatch shape as
+    """Ask the workspace's active AI provider to browse a specific site
+    (via its native web search tool) and list real products found there.
+    relationship_type selects which intro frames the request — "competitor"
+    (default), "reseller" (told it's carrying the workspace's own products,
+    not a rival's catalog), or "own" (the workspace scanning its own site to
+    populate its catalog, used by catalog/router.py's website-import — see
+    _DISCOVER_PRODUCTS_INTRO). Same dispatch shape as
     discover_competitor_sites — reused deliberately rather than adding a
     per-provider fetch/url-context tool: none of the three providers render
     JavaScript anyway, so a dedicated fetch tool wouldn't close that gap.
@@ -453,29 +575,66 @@ async def discover_competitor_products(
     prompt = _DISCOVER_PRODUCTS_PROMPT_TEMPLATE.format(
         intro=intro_template.format(label=label), domain=domain, max_products=max_products
     )
-    return await _run_web_search_prompt(db, workspace_id, prompt, max_products)
+    result, search_count, citation_urls = await _run_web_search_prompt(db, workspace_id, prompt, max_products)
+    # The model writes its own "url" field into the JSON it returns, which
+    # is free-text the model composed — it can be an inferred/guessed URL
+    # that the search tool never actually visited, not necessarily a real
+    # page (this is the root cause behind product links turning out to be
+    # broken). citation_urls, in contrast, is the set of URLs the search
+    # tool itself actually visited/cited for this response — cross-check
+    # each product's reported url against that set so callers can tell a
+    # confirmed link from an unconfirmed guess, rather than presenting
+    # every link with the same unearned confidence.
+    for product in result.get("products", []):
+        product["url_verified"] = _url_is_cited(product.get("url"), citation_urls)
+    return result, search_count
 
 
 _MATCH_PROMPT_TEMPLATE = (
     "You are matching a competitor's products against a business's own product catalog to "
-    "find equivalent or directly comparable items for price comparison — not just same "
-    "category, the same or a very similar item.\n\n"
+    "find genuinely equivalent or directly comparable items for price comparison — not just "
+    "the same broad category, the same specific kind of product at a similar tier.\n\n"
     "The business's own products (indexed from 0):\n{own_products}\n\n"
     "The competitor's products (indexed from 0):\n{competitor_products}\n\n"
-    "For each competitor product that has a clear equivalent among the business's own "
-    "products, respond with a pairing. Skip competitor products with no reasonable match "
-    "rather than forcing a weak one — it is fine to return fewer matches than competitor "
+    "For each pairing you consider, reason in this order:\n"
+    "1. Type/class first: is this genuinely the same kind of product — same form factor, "
+    "segment, or service tier? A city car/hatchback is not comparable to a compact SUV even "
+    "though both are cars; a shared-hosting plan is not comparable to a dedicated server even "
+    "though both are \"hosting\"; a large cargo van is not comparable to a small utility van. "
+    "If the two are a fundamentally different type or class of product, do NOT propose the "
+    "pairing, no matter how similar the price or name looks.\n"
+    "2. Within that same type/class, compare specs/capacity/tier (size, power, storage, seats, "
+    "materials — whatever is relevant to this category) to judge how close a match it really is.\n"
+    "3. Price is a secondary sanity check, not the deciding factor: when both products are "
+    "priced in the same currency and the prices differ by roughly half or more, treat that as a "
+    "signal the products may not truly be comparable and either lower your confidence noticeably "
+    "or skip the pairing — unless you can point to a specific reason for the gap (e.g. a base "
+    "trim vs. a premium trim of the same model). Never use raw price magnitude to judge fit when "
+    "the two products are priced in different currencies.\n\n"
+    "Confidence should reflect how directly comparable the pairing genuinely is: 90-100 for "
+    "essentially the same product or trim; 70-89 for the same type/class and a closely "
+    "comparable spec/tier; 50-69 for the same general type but with a real, noticeable "
+    "difference in spec or tier — use this band sparingly. Skip the pairing entirely rather "
+    "than forcing anything weaker: it is fine to return fewer matches than competitor "
     "products, or none at all.\n\n"
     "Respond with ONLY a JSON object, no markdown fences, no commentary before or after: "
     '{{"matches": [{{"competitor_product_index": <int>, "product_index": <int>, '
-    '"confidence": <integer 0-100, how confident this is genuinely the same/comparable item>, '
-    '"rationale": "<1-2 sentences explaining why these are comparable>"}}]}}'
+    '"confidence": <integer 0-100, per the bands above>, '
+    '"rationale": "<1-2 sentences: name the shared product type/class these both are, then '
+    'what makes them comparable (or note any real spec/price difference you weighed)>"}}]}}'
 )
 
 _MAX_MATCH_OWN_PRODUCTS = 300
+# Matching is pure reasoning over data already in hand (no web search cost),
+# and getting this right depends on the model actually seeing the
+# type/segment cues that usually live in prose (e.g. "SUV compact", "Citadine
+# hybride") — worth a more generous per-product budget here than the
+# business-context sample (_MAX_DESCRIPTION_CHARS) uses, since prompt size
+# is a non-issue at this scale (hundreds of products, not thousands).
+_MAX_MATCH_DESCRIPTION_CHARS = 500
 
 
-def _format_products_for_matching(products: list, id_attr: str = "id") -> str:
+def _format_products_for_matching(products: list) -> str:
     lines = []
     for i, p in enumerate(products):
         parts = [p.name if hasattr(p, "name") else p.title]
@@ -487,8 +646,8 @@ def _format_products_for_matching(products: list, id_attr: str = "id") -> str:
             parts.append(f"- {currency} {price}".strip())
         desc = (getattr(p, "description", None) or "").strip()
         if desc:
-            if len(desc) > _MAX_DESCRIPTION_CHARS:
-                desc = desc[:_MAX_DESCRIPTION_CHARS].rstrip() + "…"
+            if len(desc) > _MAX_MATCH_DESCRIPTION_CHARS:
+                desc = desc[:_MAX_MATCH_DESCRIPTION_CHARS].rstrip() + "…"
             parts.append(f": {desc}")
         lines.append(f"{i}. " + " ".join(parts))
     return "\n".join(lines) if lines else "(none)"
@@ -518,7 +677,7 @@ async def match_products(
     if config.provider == "openai":
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(api_key=api_key)
+        client = AsyncOpenAI(api_key=api_key, timeout=_OPENAI_TIMEOUT)
         resp = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -531,7 +690,13 @@ async def match_products(
         client = AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
             model=model,
-            max_tokens=2000,
+            # 4000, not 2000: a large discovered-products batch (Cap Connect
+            # alone has 54) times a full own-catalog match pass, each with the
+            # now-required type/class rationale, can genuinely exceed 2000
+            # tokens of JSON output — a truncated response fails _extract_
+            # json_object's json.loads entirely rather than degrading
+            # gracefully, so this needs real headroom, not a tight cap.
+            max_tokens=4000,
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(block.text for block in resp.content if block.type == "text")
@@ -593,7 +758,15 @@ _REPORT_NARRATIVE_PROMPT_TEMPLATE = (
     "IMPORTANT — reading price_index: a price_index of exactly 100 means priced at the tracked same-currency "
     "average; price_index MINUS 100 is the exact percentage above/below that average (e.g. 112.34 means about "
     "12% above average, 87 means about 13% below average). Never restate the index number itself as a "
-    "percentage, and never compute or restate a ranking/index number for a product where none is given below.\n\n"
+    "percentage (112.34 is NOT \"112% above average\"), and never compute or restate a ranking/index number for "
+    "a product where none is given below.\n\n"
+    "IMPORTANT — this report is written for a business manager, not an analyst: never use the literal words "
+    "\"rank\" or \"index\" anywhere in your output, and never print a bare labeled number like \"rank 3\" or "
+    "\"index 112.34\" — in any of the four sections, including recommendations. Always translate into a plain "
+    "comparative sentence instead, e.g. \"the 3rd most expensive of 8 tracked sellers, about 8% above the "
+    "tracked average\" or \"the cheapest of 5 tracked sellers, roughly 15% below the average\". Where a "
+    "per-product plain-language position phrase is already given below, prefer reusing or lightly paraphrasing "
+    "it — it is already correct, don't derive your own from scratch.\n\n"
     "Market coverage — full discovered catalogs of every saved competitor, not just matched products "
     "(this is what lets you talk about assortment/whitespace, not only price):\n"
     "{market_coverage_text}\n\n"
@@ -605,10 +778,14 @@ _REPORT_NARRATIVE_PROMPT_TEMPLATE = (
     "or second-guess them):\n{alerts_text}\n\n"
     "Write four things:\n"
     "1. executive_summary (2-4 sentences, plain and factual; if a previous report's summary is given, note the "
-    "most important change(s) since then).\n"
-    "2. market_position (3-5 sentences synthesizing the ranking metrics above — cite specific products by name "
-    "with their real rank/index/sellers_cheaper numbers already given; if most or all products have no "
-    "same-currency ranking data, say so plainly rather than inventing a comparison).\n"
+    "most important change(s) since then; if the data below supports at least one recommendation, close with a "
+    "short clause naming the single most pressing one so a reader who stops here still gets the bottom line — "
+    "do not force this if nothing meaningful rises above the rest).\n"
+    "2. market_position (3-5 sentences a manager would read comfortably — cite specific products by name and "
+    "describe each one's price standing in plain comparative language using the real rank/index/sellers_cheaper "
+    "numbers already given (e.g. \"the 3rd most expensive of 8 tracked sellers, about 8% above the tracked "
+    "average\"), never as a bare labeled statistic; if most or all products have no same-currency ranking data, "
+    "say so plainly rather than inventing a comparison).\n"
     "3. competitive_gaps (3-5 sentences synthesizing the market-coverage data — catalog-size differences, and "
     "notable unmatched products by name from competitor-type sites only; if there are no saved competitor-type "
     "sites, say so plainly).\n"
@@ -650,7 +827,14 @@ def _format_comparison_groups_for_narrative(groups: list[dict]) -> str:
             lines.append(
                 f"  metrics: ranked #{m['price_rank']} of {m['same_currency_competitors_count'] + 1} tracked "
                 f"sellers (same currency), price_index {m['price_index']}, {m['sellers_cheaper']} cheaper, "
-                f"cheapest tracked competitor \"{m['cheapest_competitor_name']}\" at {m['cheapest_competitor_price']:.2f}"
+                f"cheapest tracked competitor \"{m['cheapest_competitor_name']}\" at {m['cheapest_competitor_price']:.2f}, "
+                # Already-correct plain-language phrasing of the same numbers
+                # above — hand it to the model to reuse/paraphrase rather
+                # than re-derive from scratch, so the narrative prose and
+                # the report's own price_position_summary field (rendered
+                # side by side in the same report) can't drift apart on
+                # rounding/interpretation.
+                f"plain-language position: \"{m['price_position_summary']}\""
             )
         else:
             lines.append("  metrics: no same-currency competitor price data available for ranking")
@@ -750,7 +934,7 @@ async def generate_report_narrative(
     if config.provider == "openai":
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(api_key=api_key)
+        client = AsyncOpenAI(api_key=api_key, timeout=_OPENAI_TIMEOUT)
         resp = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],

@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Pencil, Plus, Sparkles } from "lucide-react";
 
+import { AiProviderRequiredNotice } from "@/components/ui/ai-provider-notice";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, ApiError, type ModelTier, type Product } from "@/lib/api";
+import { useActivity } from "@/lib/activity";
+import { useAiProviderStatus } from "@/lib/aiProvider";
 import { TIER_BADGE_CLASS, TIER_LABEL } from "@/lib/modelTiers";
 
 const CURRENCIES = ["USD", "EUR", "GBP", "MAD"];
@@ -19,6 +22,12 @@ interface ProductDialogProps {
 
 export function ProductDialog({ product, onSaved }: ProductDialogProps) {
   const editing = !!product;
+  // Only a website-imported product ever has a source page to show/fix —
+  // manual/CSV products have nothing here (and never will, since nothing
+  // else sets Product.source_url).
+  const showSourceUrl = editing && product?.import_source === "website_ai";
+  const { track } = useActivity();
+  const { hasActiveProvider } = useAiProviderStatus();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
@@ -28,6 +37,7 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
   const [brand, setBrand] = useState("");
   const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -49,6 +59,7 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
     setBrand(product?.brand ?? "");
     setCategory(product?.category ?? "");
     setDescription(product?.description ?? "");
+    setSourceUrl(product?.source_url ?? "");
     setImageUrl(product?.image_url ?? null);
     setImageFile(null);
     setImagePreview(null);
@@ -84,7 +95,12 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
     setGenerateError(null);
     setGenerating(true);
     try {
-      const result = await api.products.aiDescribe(imageFile);
+      // No href: unlike the other tracked actions, this result only makes
+      // sense applied to this dialog's own form fields while it's still
+      // open — there's no separate page it could send you to if you close
+      // early. Still tracked so a closed dialog doesn't look like the
+      // request vanished into nothing.
+      const result = await track("ai-describe", "Generate product details from photo", api.products.aiDescribe(imageFile));
       setName(result.title);
       setDescription(result.description);
       if (result.category) setCategory(result.category);
@@ -114,6 +130,9 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
       sku: sku.trim() || null,
       brand: brand.trim() || null,
       category: category.trim() || null,
+      // Only a website-import ever has a source URL to correct — never
+      // sent for manual/CSV products, which have nothing to touch here.
+      ...(showSourceUrl ? { source_url: sourceUrl.trim() || null } : {}),
     };
     try {
       if (editing) {
@@ -184,7 +203,7 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={!imageFile || generating}
+                  disabled={!imageFile || generating || hasActiveProvider === false}
                   onClick={handleGenerate}
                 >
                   <Sparkles className="size-3.5" />
@@ -196,11 +215,14 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
                   </span>
                 )}
               </div>
-              <p className="mt-1 text-xs text-slate-soft">
-                {imageFile ? "Suggests a title, category, and factual description from the photo." : "Add a photo to enable AI suggestions."}
-              </p>
+              {hasActiveProvider !== false && (
+                <p className="mt-1 text-xs text-slate-soft">
+                  {imageFile ? "Suggests a title, category, and factual description from the photo." : "Add a photo to enable AI suggestions."}
+                </p>
+              )}
             </div>
           </div>
+          {hasActiveProvider === false && <AiProviderRequiredNotice action="AI product description" />}
           {generateError && <p className="text-sm text-danger">{generateError}</p>}
 
           <div className="space-y-1.5">
@@ -275,6 +297,22 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
               <Input id="category" value={category} onChange={(e) => setCategory(e.target.value)} />
             </div>
           </div>
+
+          {showSourceUrl && (
+            <div className="space-y-1.5">
+              <Label htmlFor="source-url">Source URL</Label>
+              <Input
+                id="source-url"
+                type="url"
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                placeholder="https://example.com/product-page"
+              />
+              <p className="text-xs text-slate-soft">
+                The page this was imported from. Fix it if the site's own page wasn&apos;t the exact match.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="sku">SKU (optional)</Label>

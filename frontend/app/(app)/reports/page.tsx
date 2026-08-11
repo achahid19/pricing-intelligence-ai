@@ -1,15 +1,18 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, Download, Pencil, Search, Sparkles, Trash2, X } from "lucide-react";
 
+import { AiProviderRequiredNotice } from "@/components/ui/ai-provider-notice";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { api, ApiError, type CompetitorReport } from "@/lib/api";
+import { useAiProviderStatus } from "@/lib/aiProvider";
 
 const STATUS_TONE: Record<string, BadgeTone> = {
   completed: "good",
@@ -177,6 +180,9 @@ export default function ReportsPage() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [reportIntervalHours, setReportIntervalHours] = useState<number | null>(null);
+  const [startedMessage, setStartedMessage] = useState<string | null>(null);
+  const { hasActiveProvider } = useAiProviderStatus();
 
   function load() {
     api.reporting.list().then(setReports).catch(() => setReports([]));
@@ -184,14 +190,24 @@ export default function ReportsPage() {
 
   useEffect(() => {
     load();
+    // Settings defines the schedule but never showed it anywhere near
+    // where a due report would actually appear — this is the connection.
+    api.workspace.me().then((ws) => setReportIntervalHours(ws.report_interval_hours)).catch(() => {});
   }, []);
 
   async function handleGenerate() {
     setError(null);
+    setStartedMessage(null);
     setGenerating(true);
     try {
-      const report = await api.reporting.create();
-      router.push(`/reports/${report.id}`);
+      // Fire-and-forget on purpose: this now kicks off the full pipeline
+      // in the background (can take minutes — see reporting/service.py's
+      // run_full_pipeline), so there's no report id yet to navigate to.
+      // The Sidebar's activity bell (via lib/pipelineStatus.tsx's poller)
+      // picks this run up within ~15s and links straight to the report
+      // once it's actually ready.
+      await api.reporting.create();
+      setStartedMessage("Report generation started — check Activity (bell icon) for progress.");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
@@ -251,17 +267,30 @@ export default function ReportsPage() {
         title="Reports"
         description="An AI-written summary of your tracked matches — price comparisons, alerts, and recommendations."
         actions={
-          <Button onClick={handleGenerate} disabled={generating}>
+          <Button onClick={handleGenerate} disabled={generating || hasActiveProvider === false}>
             <Sparkles className="size-4" />
             {generating ? "Generating…" : "Generate report"}
           </Button>
         }
       />
 
-      {error && <p className="mt-4 text-sm text-danger">{error}</p>}
-      {generating && (
-        <p className="mt-4 text-sm text-slate-soft">This can take a few seconds — the AI is writing your summary.</p>
+      {hasActiveProvider === false && (
+        <div className="mt-2">
+          <AiProviderRequiredNotice action="Report generation" />
+        </div>
       )}
+
+      {reportIntervalHours != null && (
+        <p className="mt-2 text-sm text-slate-soft">
+          Next report generates automatically ({reportIntervalHours === 24 ? "Daily" : "Weekly"}) —{" "}
+          <Link href="/settings" className="text-accent hover:underline">
+            change in Settings →
+          </Link>
+        </p>
+      )}
+
+      {error && <p className="mt-4 text-sm text-danger">{error}</p>}
+      {startedMessage && !error && <p className="mt-4 text-sm text-good">{startedMessage}</p>}
 
       {reports && reports.length > 0 && (
         <div className="mt-6 flex flex-wrap items-end gap-3">
@@ -306,7 +335,11 @@ export default function ReportsPage() {
 
       {reports && reports.length === 0 && (
         <p className="mt-6 text-sm text-slate">
-          No reports yet — confirm at least one priced product match, then click "Generate report" above.
+          No reports yet — confirm at least one{" "}
+          <Link href="/discovery" className="text-accent hover:underline">
+            priced product match
+          </Link>
+          , then click "Generate report" above.
         </p>
       )}
 

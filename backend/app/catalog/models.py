@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -8,9 +8,15 @@ from app.db.database import Base
 
 class Product(Base):
     """
-    Workspace-owned catalog item. name/price are the only required fields
+    Workspace-owned catalog item. name is the only truly required field
     (see docs/PROJECT.md Step 2) — everything else, including image, is
     optional so plain manual/CSV entry is never blocked by a missing field.
+    price is nullable: not every source has one upfront (a website-import
+    candidate from a site that doesn't publish prices, e.g. a B2B or brand
+    site) — a priceless product can still be cataloged, matched, and edited
+    later once a real price is known. It's simply excluded from anything
+    that fundamentally needs a number (report price-comparison/ranking,
+    own-price-change alerts) until then — see reporting/service.py.
 
     `import_source` records how this row was created (manual|csv|url|
     image_ai|website_ai) — purely observational/debugging, no behavior
@@ -24,7 +30,7 @@ class Product(Base):
     )
 
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     currency: Mapped[str] = mapped_column(Text, nullable=False, default="USD")
     # MAP floor — the lowest price resellers are allowed to *advertise* this
     # product at. Optional and independent of `price`: not every workspace
@@ -41,6 +47,24 @@ class Product(Base):
     barcode: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     import_source: Mapped[str] = mapped_column(Text, nullable=False, default="manual")
+    # The exact page a website-imported product was found on (see
+    # catalog/router.py's confirm_website_import) — lets the catalog link
+    # straight back to the source for verification. Null for every other
+    # import_source. Editable via PATCH (ProductDialog's "Source URL"
+    # field) — a discovered page can turn out generic/wrong, and the user
+    # may know the real one even when the AI didn't.
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Whether source_url is actually confirmed real — see
+    # ai_client._url_is_cited / url_check for what "confirmed" means at
+    # discovery time. Three states, not two: True (confirmed at discovery,
+    # or the user just typed/corrected it themselves — see update_product),
+    # False (positively known bad — e.g. url_check.find_generic_urls caught
+    # several different products sharing one non-specific page), and NULL
+    # (no signal either way — every non-website_ai product, and any
+    # website_ai row created before this field existed). NULL is
+    # deliberately NOT treated as "bad" in the UI — it just means no
+    # verification was ever attempted, not that verification failed.
+    source_url_verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

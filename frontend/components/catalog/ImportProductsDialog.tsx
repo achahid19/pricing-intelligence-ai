@@ -6,6 +6,7 @@ import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { api, ApiError, type ImportResult } from "@/lib/api";
+import { useActivity } from "@/lib/activity";
 
 export function ImportProductsDialog({ onImported }: { onImported: () => void }) {
   const [open, setOpen] = useState(false);
@@ -14,13 +15,14 @@ export function ImportProductsDialog({ onImported }: { onImported: () => void })
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { track } = useActivity();
 
   async function handleFile(file: File) {
     setError(null);
     setResult(null);
     setLoading(true);
     try {
-      const res = await api.products.importFile(file);
+      const res = await track("csv-import", `Import ${file.name}`, api.products.importFile(file), { href: "/catalog" });
       setResult(res);
       onImported();
     } catch (err) {

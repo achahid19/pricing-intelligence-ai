@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { CheckCircle2, Eye } from "lucide-react";
+import { CheckCircle2, Eye, Package, Search, TrendingUp } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, cardClassName } from "@/components/ui/card";
@@ -24,9 +25,11 @@ import {
   type ModelInfo,
   type Workspace,
 } from "@/lib/api";
+import { useAiProviderStatus } from "@/lib/aiProvider";
 import { COUNTRIES } from "@/lib/countries";
 import { INDUSTRIES } from "@/lib/industries";
 import { TIER_LABEL, TIER_ORDER } from "@/lib/modelTiers";
+import { useProductTour } from "@/lib/productTour";
 import { cn } from "@/lib/utils";
 
 const OTHER_INDUSTRY = "Other";
@@ -45,6 +48,8 @@ function findModel(models: ModelInfo[], id: string | null | undefined): ModelInf
 }
 
 export default function SettingsPage() {
+  const { refresh: refreshAiProviderStatus } = useAiProviderStatus();
+  const { restart: restartProductTour } = useProductTour();
   const [configs, setConfigs] = useState<AiProviderConfig[] | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [provider, setProvider] = useState<AiProvider>("openai");
@@ -64,9 +69,23 @@ export default function SettingsPage() {
   const [industryOther, setIndustryOther] = useState("");
   const [website, setWebsite] = useState("");
   const [reportIntervalHours, setReportIntervalHours] = useState("");
+  const [refreshBeforeReport, setRefreshBeforeReport] = useState(false);
   const [contextSaving, setContextSaving] = useState(false);
   const [contextError, setContextError] = useState<string | null>(null);
   const [contextSaved, setContextSaved] = useState(false);
+  // A live snapshot of the same three counts Home shows — Settings'
+  // own copy already mentions "discovery," "reports," and "catalog
+  // assist" without ever linking to any of them; this both orients a
+  // reader and gives them somewhere to actually go.
+  const [productCount, setProductCount] = useState<number | null>(null);
+  const [savedSiteCount, setSavedSiteCount] = useState<number | null>(null);
+  const [confirmedMatchCount, setConfirmedMatchCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    api.products.list().then((p) => setProductCount(p.length)).catch(() => {});
+    api.discovery.listSites("saved").then((s) => setSavedSiteCount(s.length)).catch(() => {});
+    api.discovery.listTrackedMatches().then((m) => setConfirmedMatchCount(m.length)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -93,6 +112,7 @@ export default function SettingsPage() {
       }
       setWebsite(ws.website ?? "");
       setReportIntervalHours(ws.report_interval_hours != null ? String(ws.report_interval_hours) : "");
+      setRefreshBeforeReport(ws.refresh_before_report ?? false);
     });
   }, []);
 
@@ -122,6 +142,10 @@ export default function SettingsPage() {
         market: resolvedIndustry || null,
         website: website.trim() || null,
         report_interval_hours: reportIntervalHours.trim() ? Number(reportIntervalHours) : null,
+        // Forced off when saving as Manual only — otherwise a value set
+        // while Daily/Weekly was selected would sit silently true in the
+        // DB with no visible UI trace once frequency switches back.
+        refresh_before_report: reportIntervalHours.trim() ? refreshBeforeReport : false,
       });
       setWorkspace(updated);
       setContextSaved(true);
@@ -198,6 +222,11 @@ export default function SettingsPage() {
       setSaved(true);
       const fresh = await api.workspace.listAiProviders();
       setConfigs(fresh);
+      // The shared AiProviderStatusProvider (used by every AI-feature page
+      // to prompt/disable actions) has its own copy of this same fact —
+      // without this, a page visited before this save would keep showing
+      // "set one up" until a full reload.
+      refreshAiProviderStatus();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
@@ -208,6 +237,28 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-5xl px-8 py-10">
       <PageHeader title="Settings" description="Your AI provider key — used for catalog assist, discovery, and reports." />
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate">
+        <Link href="/catalog" className="inline-flex items-center gap-1.5 hover:text-accent">
+          <Package className="size-3.5" />
+          {productCount ?? "…"} products
+        </Link>
+        <Link href="/discovery" className="inline-flex items-center gap-1.5 hover:text-accent">
+          <Search className="size-3.5" />
+          {savedSiteCount ?? "…"} saved competitors
+        </Link>
+        <Link href="/tracked" className="inline-flex items-center gap-1.5 hover:text-accent">
+          <TrendingUp className="size-3.5" />
+          {confirmedMatchCount ?? "…"} confirmed matches
+        </Link>
+        <button
+          type="button"
+          onClick={restartProductTour}
+          className="inline-flex items-center gap-1.5 text-slate-soft hover:text-accent"
+        >
+          Replay product tour
+        </button>
+      </div>
 
       <div className="mt-6 grid grid-cols-1 items-start gap-8 lg:grid-cols-2">
       <div>
@@ -393,6 +444,18 @@ export default function SettingsPage() {
               <option value="24">Daily</option>
               <option value="168">Weekly</option>
             </Select>
+          </div>
+
+          <div className={cn("space-y-1.5", !reportIntervalHours && "opacity-50")}>
+            <label className="flex items-center gap-3">
+              <Checkbox
+                checked={refreshBeforeReport}
+                onCheckedChange={(checked) => setRefreshBeforeReport(checked)}
+                disabled={!reportIntervalHours}
+              />
+              <span className="text-sm text-ink">Run the full pipeline before each report</span>
+            </label>
+            <InfoTooltip text="Before each scheduled report: search for new competitors (auto-saving ones the AI is ≥80% confident about), re-check every saved competitor's products, and re-run matching (auto-confirming matches ≥80% confident, no review step) — so the report reflects a genuinely current picture, not just whatever was last discovered by hand. Adds AI cost and a few extra minutes to the scheduled run." />
           </div>
 
           {contextError && <p className="text-sm text-danger">{contextError}</p>}

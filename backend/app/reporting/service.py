@@ -7,19 +7,33 @@ ai_client.generate_report_narrative) are AI-authored text. The AI is never
 asked to compute or judge a comparison, only to write about one already
 computed.
 """
+import asyncio
+import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.models import Product, ProductSnapshot
-from app.discovery.models import CompetitorProductSnapshot
-from app.discovery.service import fetch_market_coverage, fetch_new_competitor_products, fetch_tracked_matches
+from app.db.database import AsyncSessionLocal
+from app.discovery.models import CompetitorProductSnapshot, CompetitorSite
+from app.discovery.service import (
+    PIPELINE_AUTO_CONFIRM_THRESHOLD,
+    PIPELINE_AUTO_SAVE_THRESHOLD,
+    fetch_market_coverage,
+    fetch_new_competitor_products,
+    fetch_tracked_matches,
+    refresh_saved_sites,
+    run_site_discovery,
+)
 from app.reporting.metrics import group_comparison_rows
 from app.reporting.models import CompetitorReport
 from app.services import ai_client
 from app.services.model_catalog import default_model_for
 from app.workspace.models import AiProviderConfig, Workspace
+
+logger = logging.getLogger(__name__)
 
 # A swing of at least this magnitude since the previous report is flagged
 # as a price anomaly — a named threshold, not a magic number, same
@@ -222,6 +236,11 @@ async def _build_own_price_alerts(db: AsyncSession, workspace_id: int, previous_
     result = await db.execute(select(Product).where(Product.workspace_id == workspace_id))
     alerts = []
     for product in result.scalars().all():
+        if product.price is None:
+            # No price to have moved — a priceless product (e.g. a
+            # website-imported one from a site with no published price)
+            # simply has nothing to alert on until a real price is set.
+            continue
         trend = await _compute_own_trend(db, product.id, previous_report, float(product.price))
         if trend and trend["is_anomaly"]:
             direction_word = "raised" if trend["direction"] == "up" else "lowered"
@@ -422,6 +441,14 @@ async def generate_report(db: AsyncSession, workspace: Workspace, trigger_source
 
     flat_rows = []
     for match, product, cproduct, site in match_rows:
+        if product.price is None:
+            # Can't build a price-comparison row with no price on our own
+            # side to compare from (e.g. a website-imported product from a
+            # site with no published price) — excluded until a real price
+            # is set, same as this match simply not existing for reporting
+            # purposes yet. Still fully trackable/visible on the Tracked
+            # page in the meantime.
+            continue
         competitor_price = float(cproduct.price) if cproduct.price is not None else None
         trend = await _compute_trend(db, cproduct.id, previous_report, competitor_price)
         own_trend = await _compute_own_trend(db, product.id, previous_report, float(product.price))
@@ -456,6 +483,7 @@ async def generate_report(db: AsyncSession, workspace: Workspace, trigger_source
         competitive_gaps = narrative["competitive_gaps"]
         recommendations = narrative["recommendations"]
     except Exception as exc:
+        logger.exception("report narrative generation failed for workspace %s", workspace.id)
         status_ = "failed"
         executive_summary = None
         market_position = None
@@ -489,3 +517,201 @@ async def generate_report(db: AsyncSession, workspace: Workspace, trigger_source
     await db.commit()
     await db.refresh(report)
     return report
+
+
+async def run_full_pipeline(db: AsyncSession, workspace: Workspace, trigger_source: str) -> CompetitorReport:
+    """The automated discover→match→report pipeline: fresh competitor
+    discovery (auto-saving ≥PIPELINE_AUTO_SAVE_THRESHOLD confidence,
+    skipping human review), then product discovery + auto-match for every
+    saved site (auto-confirming ≥PIPELINE_AUTO_CONFIRM_THRESHOLD
+    confidence matches), then generate_report. Two callers: catalog/
+    router.py's onboarding trigger (trigger_source="onboarding", the first
+    time a workspace's catalog goes from empty to non-empty) and
+    reporting/scheduler.py (trigger_source="scheduled", only when
+    Workspace.refresh_before_report is on).
+
+    Reseller/MAP discovery is deliberately never run here — it's its own
+    opt-in flow (only surfaced when a workspace selects the map_compliance
+    objective), and auto-running it for workspaces that never asked for
+    MAP tracking would be a real surprise, unlike competitor discovery
+    which every workspace already uses by default.
+
+    Site discovery failing (rather than just finding nothing) doesn't
+    abort the pipeline — refresh_saved_sites still runs against whatever
+    sites are already saved from an earlier run, same "one thing failing
+    doesn't block the rest" principle refresh_saved_sites already applies
+    one level deeper (per saved site). Only a missing AI provider skips
+    straight to generate_report, which will raise the same
+    NoActiveProviderError itself moments later anyway — no point
+    duplicating that check here.
+
+    A first real run of this (2026-08-10) failed outright on a transient
+    Cloudflare 520 from api.openai.com ("wait and retry") — with no human
+    watching an unattended background pipeline to click "try again," that
+    single AI-provider hiccup was enough to turn a real, otherwise-working
+    setup into an empty one. One retry after a short pause covers exactly
+    that class of failure without meaningfully slowing down a job nothing
+    is waiting on synchronously; NoActiveProviderError is excluded since a
+    missing key will never fix itself between the two attempts.
+
+    The whole run is bracketed by Workspace.pipeline_status (committed to
+    "running" immediately, before any AI call, so a concurrent poll can
+    observe it mid-run — this can take minutes) and finalized to
+    "completed"/"failed" in every exit path, success or exception. This
+    is the only visibility a frontend has into this pipeline at all: it
+    runs entirely server-side (BackgroundTasks or the scheduler), so
+    there's no in-flight promise for the existing client-side
+    ActivityProvider to wrap the way every other tracked action is —
+    without this, the whole run (started, and how it ended) was silently
+    invisible, confirmed as a real gap live on 2026-08-10.
+
+    Workspace.pipeline_substeps adds per-step granularity on top of that
+    single status: site discovery, one products+match pair per saved
+    site, then the report itself — built up front as "pending" once the
+    saved-site list is known, flipped to "done"/"error" as each actually
+    resolves (via _mark_substep and refresh_saved_sites' on_step
+    callback), not written once at the end. The frontend renders these as
+    child rows under the one parent activity entry. refresh_saved_sites
+    now runs its per-site work CONCURRENTLY (bounded by discovery/
+    service.py's MAX_CONCURRENT_SITE_REFRESHES), so these child rows can
+    resolve out of the order they were seeded in — expected, not a bug."""
+    workspace.pipeline_status = "running"
+    workspace.pipeline_trigger_source = trigger_source
+    workspace.pipeline_started_at = datetime.now(timezone.utc)
+    workspace.pipeline_finished_at = None
+    workspace.pipeline_error_message = None
+    workspace.pipeline_report_id = None
+    # The full plan isn't known yet (which sites will be saved depends on
+    # the discovery step about to run) — seeded with just the first step so
+    # a poller sees *something* immediately; the per-site steps get
+    # appended once that's resolved, below.
+    workspace.pipeline_substeps = [{"id": "discovery", "label": "Searching for new competitors", "status": "pending"}]
+    await db.commit()
+
+    # From here on, workspace.pipeline_substeps is owned EXCLUSIVELY by
+    # _mark_substep below, via its own dedicated session (substep_db) and
+    # lock (substep_lock) — never reassigned directly on the outer
+    # `workspace` object again. That's what makes it safe for refresh_
+    # saved_sites' concurrent per-site tasks (each on their own session)
+    # to call it too: asyncio is single-threaded/cooperative, so the lock
+    # fully serializes each read-modify-reassign-commit cycle, and reusing
+    # one session's identity map (rather than the outer `db`, or a fresh
+    # session per call) means every call sees the cumulative effect of
+    # every prior write through it — no update from a fast-finishing site
+    # can ever be silently lost under a slower one's stale in-memory copy.
+    substep_lock = asyncio.Lock()
+    substep_db = AsyncSessionLocal()
+
+    async def _mark_substep(step_id: str, status: str, label: Optional[str] = None) -> None:
+        """Flips one Workspace.pipeline_substeps entry (adding it if it
+        wasn't pre-registered yet) and commits. Reassigns the whole list
+        rather than mutating in place: this column isn't wrapped in
+        SQLAlchemy's MutableList, so an in-place .append()/item mutation
+        wouldn't be seen as a change to flush, same reasoning already
+        documented on the model field itself."""
+        async with substep_lock:
+            ws = await substep_db.get(Workspace, workspace.id)
+            if ws is None:
+                return
+            steps = list(ws.pipeline_substeps or [])
+            for i, step in enumerate(steps):
+                if step["id"] == step_id:
+                    steps[i] = {**step, "status": status}
+                    break
+            else:
+                steps.append({"id": step_id, "label": label or step_id, "status": status})
+            ws.pipeline_substeps = steps
+            await substep_db.commit()
+
+    try:
+        try:
+            try:
+                await run_site_discovery(
+                    db, workspace, mode="competitor", auto_save_threshold=PIPELINE_AUTO_SAVE_THRESHOLD
+                )
+                await _mark_substep("discovery", "done")
+            except ai_client.NoActiveProviderError:
+                await _mark_substep("discovery", "error")
+            except Exception:
+                logger.warning("pipeline site discovery failed for workspace %s, retrying once in 20s", workspace.id)
+                await asyncio.sleep(20)
+                try:
+                    await run_site_discovery(
+                        db, workspace, mode="competitor", auto_save_threshold=PIPELINE_AUTO_SAVE_THRESHOLD
+                    )
+                    await _mark_substep("discovery", "done")
+                except ai_client.NoActiveProviderError:
+                    await _mark_substep("discovery", "error")
+                except Exception:
+                    logger.exception("pipeline site discovery failed for workspace %s after retry", workspace.id)
+                    await _mark_substep("discovery", "error")
+
+            # Built from the CURRENT saved-site list, not whatever existed
+            # before this function started — includes anything the
+            # discovery step above just auto-saved, so the plan a poller
+            # sees reflects what refresh_saved_sites is actually about to
+            # do. Seeded one _mark_substep call at a time (cheap, still
+            # strictly sequential here — the concurrent phase hasn't
+            # started yet) rather than one bulk write on the outer `db`,
+            # so every pipeline_substeps write funnels through the same
+            # lock-protected path from this point on.
+            saved_sites_result = await db.execute(
+                select(CompetitorSite).where(
+                    CompetitorSite.workspace_id == workspace.id, CompetitorSite.status == "saved"
+                )
+            )
+            for site in saved_sites_result.scalars().all():
+                name = site.name or site.domain
+                await _mark_substep(f"site-{site.id}-products", "pending", label=f"Discovering products — {name}")
+                await _mark_substep(f"site-{site.id}-match", "pending", label=f"Matching — {name}")
+
+            await refresh_saved_sites(
+                db, workspace.id, auto_confirm_threshold=PIPELINE_AUTO_CONFIRM_THRESHOLD, on_step=_mark_substep
+            )
+
+            await _mark_substep("report", "pending", label="Writing the report")
+            report = await generate_report(db, workspace, trigger_source=trigger_source)
+            await _mark_substep("report", "done")
+        except Exception as exc:
+            # Discard this object's now-stale in-memory pipeline_substeps
+            # (last touched before the concurrent phase began) so this
+            # commit's dirty-attribute set can't include it — see the
+            # ownership note above the substep_lock/substep_db setup.
+            await db.refresh(workspace)
+            workspace.pipeline_status = "failed"
+            workspace.pipeline_finished_at = datetime.now(timezone.utc)
+            workspace.pipeline_error_message = str(exc)[:2000]
+            await db.commit()
+            raise
+    finally:
+        await substep_db.close()
+
+    # Same reasoning as the failure path above.
+    await db.refresh(workspace)
+    workspace.pipeline_status = "completed"
+    workspace.pipeline_finished_at = datetime.now(timezone.utc)
+    workspace.pipeline_report_id = report.id
+    await db.commit()
+    return report
+
+
+async def run_full_pipeline_background(workspace_id: int, trigger_source: str) -> None:
+    """BackgroundTasks entry point for the onboarding trigger (catalog/
+    router.py) — opens its own AsyncSessionLocal() since the triggering
+    request's own db session is already closed by the time a
+    BackgroundTasks callback actually runs (same reasoning refresh_
+    matches_for_workspace already documents for itself). Never raises —
+    safe to fire-and-forget."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+        workspace = result.scalars().first()
+        if workspace is None:
+            return
+        try:
+            await run_full_pipeline(db, workspace, trigger_source=trigger_source)
+        except NoTrackedMatchesError:
+            logger.info("Skipping %s report for workspace %s: no trackable confirmed matches yet", trigger_source, workspace_id)
+        except ai_client.NoActiveProviderError:
+            logger.info("Skipping %s report for workspace %s: no active AI provider configured", trigger_source, workspace_id)
+        except Exception:
+            logger.exception("automated pipeline failed for workspace %s", workspace_id)

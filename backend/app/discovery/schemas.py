@@ -79,10 +79,16 @@ class CompetitorProductOut(BaseModel):
     stock_status: Optional[str]
     additional_info: Optional[str]
     is_trackable: bool
+    is_url_verified: bool
+    is_dismissed: bool
     discovered_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CompetitorProductUpdate(BaseModel):
+    is_dismissed: bool
 
 
 class ProductDiscoveryCreate(BaseModel):
@@ -132,7 +138,11 @@ class TrackedMatchOut(BaseModel):
 
     product_id: int
     product_name: str
-    product_price: Decimal
+    # Nullable: Product.price is optional (e.g. a website-imported product
+    # from a site with no published price) — a priceless product can still
+    # be matched and tracked here, just with no delta/MAP verdict possible
+    # until a real price is added.
+    product_price: Optional[Decimal]
     product_currency: str
     product_min_price: Optional[Decimal]
 

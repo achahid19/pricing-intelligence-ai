@@ -70,6 +70,26 @@ export interface Workspace {
   market: string | null;
   website: string | null;
   report_interval_hours: number | null;
+  refresh_before_report: boolean | null;
+  // Set once the automated onboarding pipeline has fired for this
+  // workspace's first-ever product — null until then, never reset.
+  onboarding_pipeline_triggered_at: string | null;
+  // Live status of the most recent automated pipeline run (see
+  // lib/pipelineStatus.tsx) — "running"|"completed"|"failed"|null.
+  pipeline_status: string | null;
+  pipeline_trigger_source: string | null;
+  pipeline_started_at: string | null;
+  pipeline_finished_at: string | null;
+  pipeline_error_message: string | null;
+  pipeline_report_id: number | null;
+  // Per-step plan/progress for the current (or last) run — structurally
+  // compatible with lib/activity.tsx's ActivityChild on purpose, so
+  // pipelineStatus.tsx can pass this straight through as an entry's
+  // children with no reshaping.
+  pipeline_substeps: { id: string; label: string; status: "pending" | "done" | "error" }[] | null;
+  // Set the first time the interactive first-run tour (lib/productTour.tsx)
+  // ends, by finishing or explicitly skipping — never reset by that alone.
+  product_tour_completed_at: string | null;
   onboarding_completed: boolean;
   created_at: string;
 }
@@ -81,6 +101,7 @@ export interface WorkspaceContextUpdate {
   market?: string | null;
   website?: string | null;
   report_interval_hours?: number | null;
+  refresh_before_report?: boolean | null;
 }
 
 export const KNOWN_OBJECTIVES: { value: string; label: string; description: string }[] = [
@@ -104,7 +125,9 @@ export const KNOWN_OBJECTIVES: { value: string; label: string; description: stri
 export interface Product {
   id: number;
   name: string;
-  price: string;
+  // Nullable: not every source has a price upfront (e.g. website-import
+  // from a site that doesn't publish one) — addable later via edit.
+  price: string | null;
   currency: string;
   min_price: string | null;
   image_url: string | null;
@@ -114,6 +137,13 @@ export interface Product {
   category: string | null;
   barcode: string | null;
   import_source: string;
+  // The exact page a website-imported product was found on — null for
+  // every other import_source.
+  source_url: string | null;
+  // true = confirmed real (at discovery time, or the user corrected it
+  // themselves); false = positively known bad (e.g. shared by several
+  // unrelated products); null = no signal either way, not a red flag.
+  source_url_verified: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -129,6 +159,10 @@ export interface ProductCreate {
   brand?: string | null;
   category?: string | null;
   barcode?: string | null;
+  // Update-only in practice (manual creation has nothing to set this
+  // from) — editable so a wrong/generic website-import link can be
+  // corrected by hand.
+  source_url?: string | null;
 }
 
 export interface ImportResult {
@@ -142,6 +176,32 @@ export interface AiDescribeResult {
   description: string;
   category: string | null;
   image_url: string;
+}
+
+export interface WebsiteImportCandidate {
+  title: string;
+  // null when the site didn't publish a price (B2B, quote-based, brand
+  // sites that route to retailers) — still shown for review, not dropped;
+  // the user can type in a real/internal price before importing it.
+  price: string | null;
+  currency: string | null;
+  url: string;
+  // True when `url` is actually confirmed real (AI citation or a real
+  // HTTP reachability check) — not just a string the model wrote into its
+  // own JSON output, which can be an inferred/never-fetched guess.
+  url_verified: boolean;
+  description: string | null;
+  stock_status: string | null;
+  additional_info: string | null;
+}
+
+export interface WebsiteImportDiscoverResult {
+  domain: string;
+  candidates: WebsiteImportCandidate[];
+  no_price_count: number;
+  // Excluded from `candidates` entirely — products whose name already
+  // exists in the catalog, so re-running discovery only shows new ones.
+  already_imported_count: number;
 }
 
 export type AiProvider = "openai" | "google" | "anthropic";
@@ -211,6 +271,15 @@ export interface CompetitorProduct {
   stock_status: string | null;
   additional_info: string | null;
   is_trackable: boolean;
+  // True when `url` was actually confirmed real — either cited by the AI's
+  // own web search tool, or (citation coverage is sparse in practice) a
+  // real HTTP reachability check. False on rows discovered before this
+  // field existed — never re-verified, not necessarily actually broken.
+  is_url_verified: boolean;
+  // "Not interested" — excluded from matching, market coverage, and
+  // reports; a future discovery re-run leaves it alone rather than
+  // reviving it. Distinct from a hard delete: restorable via updateProduct.
+  is_dismissed: boolean;
   discovered_at: string;
   updated_at: string;
 }
@@ -242,7 +311,7 @@ export interface TrackedMatch {
   created_at: string;
   product_id: number;
   product_name: string;
-  product_price: string;
+  product_price: string | null;
   product_currency: string;
   product_min_price: string | null;
   competitor_product_id: number;
@@ -347,6 +416,7 @@ export interface ProductMetrics {
   same_currency_competitors_count: number;
   sellers_cheaper: number;
   price_index: number | null;
+  price_position_summary: string | null;
   cheapest_competitor_name: string | null;
   cheapest_competitor_price: number | null;
   cheapest_competitor_site_id: number | null;
@@ -449,6 +519,7 @@ export const api = {
     me: () => request<Workspace>("/workspace/me"),
     updateContext: (payload: WorkspaceContextUpdate) =>
       request<Workspace>("/workspace/me", { method: "PATCH", body: JSON.stringify(payload) }),
+    completeProductTour: () => request<Workspace>("/workspace/product-tour-complete", { method: "POST" }),
     listModelCatalog: () => request<ModelCatalog>("/workspace/models"),
     listAiProviders: () => request<AiProviderConfig[]>("/workspace/ai-provider"),
     setAiProvider: (payload: { provider: AiProvider; api_key?: string; model_override?: string | null }) =>
@@ -461,6 +532,7 @@ export const api = {
     update: (id: number, payload: Partial<ProductCreate>) =>
       request<Product>(`/products/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
     delete: (id: number) => request<void>(`/products/${id}`, { method: "DELETE" }),
+    deleteAll: () => request<{ deleted: number }>("/products", { method: "DELETE" }),
     templateUrl: "/api/v1/products/import/template",
     async importFile(file: File): Promise<ImportResult> {
       // Bypasses the shared request() helper — it always sets
@@ -496,6 +568,16 @@ export const api = {
       }
       return res.json();
     },
+    discoverFromWebsite: (url?: string) =>
+      request<WebsiteImportDiscoverResult>("/products/website-import/discover", {
+        method: "POST",
+        body: JSON.stringify({ url: url || null }),
+      }),
+    confirmWebsiteImport: (products: WebsiteImportCandidate[]) =>
+      request<ImportResult>("/products/website-import/confirm", {
+        method: "POST",
+        body: JSON.stringify({ products }),
+      }),
   },
   discovery: {
     createRun: (maxCandidates: number, mode: DiscoveryMode = "competitor") =>
@@ -507,6 +589,7 @@ export const api = {
     getRun: (id: number) => request<DiscoveryRun>(`/discovery/runs/${id}`),
     updateSite: (id: number, status: CompetitorSiteStatus) =>
       request<CompetitorSite>(`/discovery/sites/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    deleteSite: (id: number) => request<void>(`/discovery/sites/${id}`, { method: "DELETE" }),
     listSites: (siteStatus?: CompetitorSiteStatus, relationshipType?: DiscoveryMode) => {
       const params = new URLSearchParams();
       if (siteStatus) params.set("site_status", siteStatus);
@@ -526,6 +609,12 @@ export const api = {
         body: JSON.stringify({ max_products: maxProducts }),
       }),
     listProducts: (siteId: number) => request<CompetitorProduct[]>(`/discovery/sites/${siteId}/products`),
+    updateProduct: (productId: number, isDismissed: boolean) =>
+      request<CompetitorProduct>(`/discovery/products/${productId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_dismissed: isDismissed }),
+      }),
+    deleteProduct: (productId: number) => request<void>(`/discovery/products/${productId}`, { method: "DELETE" }),
     autoMatch: (siteId: number) =>
       request<ProductMatch[]>(`/discovery/sites/${siteId}/auto-match`, { method: "POST" }),
     listMatches: (siteId: number) => request<ProductMatch[]>(`/discovery/sites/${siteId}/matches`),
@@ -540,7 +629,13 @@ export const api = {
       request<TrackedMatch[]>(`/discovery/matches?status_filter=${status}`),
   },
   reporting: {
-    create: () => request<CompetitorReport>("/reporting/reports", { method: "POST" }),
+    // Kicks off the full pipeline in the background (fresh product
+    // discovery + auto-match for every saved competitor, then the report)
+    // and returns immediately — there's no report id yet at this point.
+    // Workspace.pipeline_status/pipeline_substeps (see lib/pipelineStatus.tsx)
+    // is what actually carries this forward, same as the other two
+    // trigger points (onboarding, scheduled).
+    create: () => request<{ detail: string }>("/reporting/reports", { method: "POST" }),
     list: () => request<CompetitorReport[]>("/reporting/reports"),
     get: (id: number) => request<CompetitorReport>(`/reporting/reports/${id}`),
     delete: (id: number) => request<void>(`/reporting/reports/${id}`, { method: "DELETE" }),

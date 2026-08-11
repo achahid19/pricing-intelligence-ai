@@ -11,6 +11,47 @@ dicts reporting/service.py._compute_comparison_row() already produces.
 """
 
 
+def _ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def describe_price_position(
+    price_rank: int | None, price_index: float | None, same_currency_competitors_count: int
+) -> str | None:
+    """One plain-English sentence describing a product's price standing —
+    the business-readable replacement for ever showing a raw "rank"/
+    "index" number as a label (reports are for management reading, not
+    analytics — see docs/PROGRESS.md). price_rank is rank-from-cheapest
+    (1 = cheapest, see build_comparison_metrics's tie-handling comment),
+    so the "most expensive" branch needs total - price_rank + 1, not
+    price_rank directly — get this backwards and a rank-6-of-8 product
+    (the 3rd most expensive) reads as "6th most expensive" instead. None
+    under the exact same condition price_rank/price_index are None (no
+    same-currency competitor prices).
+
+    The +/-5% band is deliberate: near-tied prices flipping rank by one
+    position between reports is noise, not a real repositioning, and this
+    app already treats 15% as its significant-change threshold elsewhere
+    (reporting/service.py's PRICE_ANOMALY_THRESHOLD_PCT) — 5% is a
+    defensible third of that. Rank is deliberately omitted inside the
+    band: it's the noisiest part of the number when the gap is tiny."""
+    if price_rank is None or price_index is None:
+        return None
+    n = same_currency_competitors_count
+    total = n + 1
+    pct = round(price_index - 100)
+    plural = "s" if n != 1 else ""
+    if abs(pct) <= 5:
+        return f"In line with the {n} tracked competitor{plural}"
+    if pct > 0:
+        expensive_rank = total - price_rank + 1
+        label = "The most expensive" if expensive_rank == 1 else f"{_ordinal(expensive_rank)} most expensive"
+        return f"{label} of {total} tracked sellers — {pct}% above the average"
+    label = "The cheapest" if price_rank == 1 else f"{_ordinal(price_rank)} cheapest"
+    return f"{label} of {total} tracked sellers — {abs(pct)}% below the average"
+
+
 def build_comparison_metrics(product_price: float, matches: list[dict]) -> dict:
     """One product's metrics block, computed only from matches where
     same_currency is True and competitor_product_price is not None.
@@ -26,6 +67,7 @@ def build_comparison_metrics(product_price: float, matches: list[dict]) -> dict:
             "same_currency_competitors_count": 0,
             "sellers_cheaper": 0,
             "price_index": None,
+            "price_position_summary": None,
             "cheapest_competitor_name": None,
             "cheapest_competitor_price": None,
             "cheapest_competitor_site_id": None,
@@ -48,6 +90,7 @@ def build_comparison_metrics(product_price: float, matches: list[dict]) -> dict:
         "same_currency_competitors_count": len(same_currency_priced),
         "sellers_cheaper": sellers_cheaper,
         "price_index": price_index,
+        "price_position_summary": describe_price_position(price_rank, price_index, len(same_currency_priced)),
         "cheapest_competitor_name": cheapest["competitor_site_name"] or cheapest["competitor_site_domain"],
         "cheapest_competitor_price": cheapest["competitor_product_price"],
         "cheapest_competitor_site_id": cheapest["competitor_site_id"],

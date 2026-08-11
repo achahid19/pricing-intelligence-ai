@@ -116,6 +116,19 @@ class ProductMetrics(BaseModel):
     same_currency_competitors_count: int
     sellers_cheaper: int
     price_index: Optional[float]
+    # Plain-English rendering of price_rank/price_index for business
+    # reading — the primary way a product's price standing should be
+    # shown; price_rank/price_index above are analytics detail, kept for
+    # anyone who wants the raw numbers, never shown as a labeled
+    # statistic ("Rank #3", "Index 112.34") in the UI or PDF.
+    # `= None` default (unlike its siblings above) is deliberate, not an
+    # oversight: this field was added after real reports already existed
+    # in the DB, and their stored JSONB content genuinely has no such key
+    # at all (not even a null value) — without a default, Pydantic
+    # response validation 500s on every historical report the instant it's
+    # listed/fetched. Confirmed live: GET /reporting/reports broke outright
+    # for a real workspace with pre-existing reports before this fix.
+    price_position_summary: Optional[str] = None
     cheapest_competitor_name: Optional[str]
     cheapest_competitor_price: Optional[float]
     cheapest_competitor_site_id: Optional[int] = None
@@ -219,3 +232,13 @@ class ReportRename(BaseModel):
     # Empty/whitespace-only clears back to null — the frontend then falls
     # back to displaying generated_at, same as a report that was never named.
     name: str = ""
+
+
+class PipelineStartedOut(BaseModel):
+    """POST /reports' response now that it kicks off the full pipeline in
+    the background instead of generating synchronously (see reporting/
+    service.py's run_full_pipeline) — there's no report id yet at request
+    time. Workspace.pipeline_status/pipeline_substeps (already polled by
+    the frontend for the other two trigger points) is what actually
+    carries progress and the eventual report id forward."""
+    detail: str = "Report generation started."

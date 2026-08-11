@@ -16,6 +16,12 @@ Provider = Literal["openai", "google", "anthropic"]
 KNOWN_OBJECTIVES = ["market_research", "price_alignment", "map_compliance"]
 
 
+class PipelineSubstep(BaseModel):
+    id: str
+    label: str
+    status: Literal["pending", "done", "error"]
+
+
 class WorkspaceOut(BaseModel):
     id: int
     name: str
@@ -25,6 +31,16 @@ class WorkspaceOut(BaseModel):
     market: Optional[str]
     website: Optional[str]
     report_interval_hours: Optional[int]
+    refresh_before_report: Optional[bool]
+    onboarding_pipeline_triggered_at: Optional[datetime]
+    pipeline_status: Optional[str]
+    pipeline_trigger_source: Optional[str]
+    pipeline_started_at: Optional[datetime]
+    pipeline_finished_at: Optional[datetime]
+    pipeline_error_message: Optional[str]
+    pipeline_report_id: Optional[int]
+    pipeline_substeps: Optional[list[PipelineSubstep]]
+    product_tour_completed_at: Optional[datetime]
     onboarding_completed: bool
     created_at: datetime
 
@@ -41,6 +57,7 @@ class WorkspaceContextUpdate(BaseModel):
     # (add https://, etc.) at the point this is actually crawled, not here.
     website: Optional[str] = Field(default=None, max_length=300)
     report_interval_hours: Optional[int] = Field(default=None, ge=1, le=168)
+    refresh_before_report: Optional[bool] = Field(default=None)
 
 
 class AiProviderConfigCreate(BaseModel):

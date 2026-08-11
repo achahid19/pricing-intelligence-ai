@@ -26,7 +26,11 @@ type RelationshipFilter = "all" | DiscoveryMode;
 // MAD 2499 isn't "5000% pricier"), so only compare when both sides share a
 // currency; otherwise the match is still shown, just with no verdict.
 function deriveMatchInfo(match: TrackedMatch) {
-  const ownPrice = Number(match.product_price);
+  // product_price is null when the product hasn't had a price set yet
+  // (e.g. website-imported from a site with no published price) — no
+  // delta/MAP verdict is possible until one is added, same treatment as a
+  // competitor price that isn't trackable.
+  const ownPrice = match.product_price != null ? Number(match.product_price) : null;
   const competitorPrice = match.competitor_product_price != null ? Number(match.competitor_product_price) : null;
   const minPrice = match.product_min_price != null ? Number(match.product_min_price) : null;
   const sameCurrency = match.competitor_product_currency === match.product_currency;
@@ -37,10 +41,10 @@ function deriveMatchInfo(match: TrackedMatch) {
     competitorPrice != null &&
     competitorPrice < minPrice;
   const delta =
-    sameCurrency && match.competitor_product_is_trackable && competitorPrice != null
+    sameCurrency && match.competitor_product_is_trackable && competitorPrice != null && ownPrice != null
       ? priceDelta(ownPrice, competitorPrice)
       : null;
-  return { competitorPrice, sameCurrency, belowMap, delta };
+  return { ownPrice, competitorPrice, sameCurrency, belowMap, delta };
 }
 
 function StatTile({
@@ -118,6 +122,86 @@ function MatchPill({
   );
 }
 
+function groupMatchesByCounterpart(matches: TrackedMatch[], keyFn: (m: TrackedMatch) => number) {
+  const map = new Map<number, TrackedMatch[]>();
+  for (const m of matches) {
+    const k = keyFn(m);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(m);
+  }
+  return Array.from(map.entries());
+}
+
+// A product can be confirmed-matched to several products from the SAME
+// competitor (e.g. one of ours against four trims of one competitor car) —
+// flat pills all sharing one label (the competitor/product name), only
+// distinguished by price, are genuinely unreadable in that case. When a
+// counterpart repeats, this renders one header (the shared identity + a
+// count) with the specific distinguishing title on each pill underneath;
+// a counterpart with exactly one match still renders as a single plain
+// pill, unchanged from before.
+function MatchCell({
+  matches,
+  groupKeyFn,
+  groupHeader,
+  pillHref,
+  pillLabel,
+  singleHref,
+  singleLabel,
+  singleBadge,
+}: {
+  matches: TrackedMatch[];
+  groupKeyFn: (m: TrackedMatch) => number;
+  groupHeader: (m: TrackedMatch) => { label: string; href: string; badge?: DiscoveryMode };
+  pillHref: (m: TrackedMatch) => string;
+  pillLabel: (m: TrackedMatch) => string;
+  singleHref: (m: TrackedMatch) => string;
+  singleLabel: (m: TrackedMatch) => string;
+  singleBadge?: (m: TrackedMatch) => DiscoveryMode | undefined;
+}) {
+  const groups = groupMatchesByCounterpart(matches, groupKeyFn);
+  return (
+    <div className="flex flex-wrap items-start gap-1.5">
+      {groups.map(([key, groupMatches]) => {
+        const first = groupMatches[0];
+        if (groupMatches.length === 1) {
+          return (
+            <MatchPill
+              key={first.id}
+              href={singleHref(first)}
+              label={singleLabel(first)}
+              relationshipType={singleBadge?.(first)}
+              match={first}
+            />
+          );
+        }
+        const header = groupHeader(first);
+        return (
+          <div key={key} className="w-full rounded-lg border border-border/70 bg-black/[0.015] p-1.5">
+            <Link
+              href={header.href}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate hover:text-accent"
+            >
+              {header.label}
+              <span className="tabular-nums text-slate-soft">({groupMatches.length})</span>
+              {header.badge && (
+                <Badge tone={header.badge === "reseller" ? "accent" : "neutral"} className="px-1.5 py-0">
+                  {header.badge}
+                </Badge>
+              )}
+            </Link>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {groupMatches.map((m) => (
+                <MatchPill key={m.id} href={pillHref(m)} label={pillLabel(m)} match={m} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function TrackedPage() {
   const [matches, setMatches] = useState<TrackedMatch[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +241,7 @@ export default function TrackedPage() {
   }, [matches, search, relationshipFilter]);
 
   const byProduct = useMemo(() => {
-    const map = new Map<number, { name: string; price: string; currency: string; minPrice: string | null; matches: TrackedMatch[] }>();
+    const map = new Map<number, { name: string; price: string | null; currency: string; minPrice: string | null; matches: TrackedMatch[] }>();
     for (const m of filtered) {
       if (!map.has(m.product_id)) {
         map.set(m.product_id, { name: m.product_name, price: m.product_price, currency: m.product_currency, minPrice: m.product_min_price, matches: [] });
@@ -200,7 +284,11 @@ export default function TrackedPage() {
 
       {matches && matches.length === 0 && (
         <p className="mt-6 text-sm text-slate">
-          No confirmed matches yet — confirm a match on a competitor's product page to start tracking it here.
+          No confirmed matches yet — confirm a match on a{" "}
+          <Link href="/discovery" className="text-accent hover:underline">
+            competitor's product page
+          </Link>{" "}
+          to start tracking it here.
         </p>
       )}
 
@@ -284,7 +372,7 @@ export default function TrackedPage() {
                           {group.name}
                         </Link>
                         <div className="text-xs tabular-nums text-slate-soft">
-                          {group.currency} {Number(group.price).toFixed(2)}
+                          {group.price != null ? `${group.currency} ${Number(group.price).toFixed(2)}` : "No price set"}
                         </div>
                         {group.minPrice != null && (
                           <div className="text-xs tabular-nums text-slate-soft" title="Minimum advertised price (MAP)">
@@ -293,17 +381,20 @@ export default function TrackedPage() {
                         )}
                       </td>
                       <td className="px-3 py-3">
-                        <div className="flex flex-wrap gap-1.5">
-                          {group.matches.map((m) => (
-                            <MatchPill
-                              key={m.id}
-                              href={`/discovery/${m.competitor_site_id}`}
-                              label={m.competitor_site_name || m.competitor_site_domain}
-                              relationshipType={m.competitor_site_relationship_type}
-                              match={m}
-                            />
-                          ))}
-                        </div>
+                        <MatchCell
+                          matches={group.matches}
+                          groupKeyFn={(m) => m.competitor_site_id}
+                          groupHeader={(m) => ({
+                            label: m.competitor_site_name || m.competitor_site_domain,
+                            href: `/discovery/${m.competitor_site_id}`,
+                            badge: m.competitor_site_relationship_type,
+                          })}
+                          pillHref={(m) => `/discovery/${m.competitor_site_id}?q=${encodeURIComponent(m.competitor_product_title)}`}
+                          pillLabel={(m) => m.competitor_product_title}
+                          singleHref={(m) => `/discovery/${m.competitor_site_id}?q=${encodeURIComponent(m.competitor_product_title)}`}
+                          singleLabel={(m) => m.competitor_site_name || m.competitor_site_domain}
+                          singleBadge={(m) => m.competitor_site_relationship_type}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -335,11 +426,18 @@ export default function TrackedPage() {
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        <div className="flex flex-wrap gap-1.5">
-                          {group.matches.map((m) => (
-                            <MatchPill key={m.id} href={`/catalog?highlight=${m.product_id}`} label={m.product_name} match={m} />
-                          ))}
-                        </div>
+                        <MatchCell
+                          matches={group.matches}
+                          groupKeyFn={(m) => m.product_id}
+                          groupHeader={(m) => ({
+                            label: m.product_name,
+                            href: `/catalog?highlight=${m.product_id}`,
+                          })}
+                          pillHref={(m) => `/discovery/${m.competitor_site_id}?q=${encodeURIComponent(m.competitor_product_title)}`}
+                          pillLabel={(m) => m.competitor_product_title}
+                          singleHref={(m) => `/catalog?highlight=${m.product_id}`}
+                          singleLabel={(m) => m.product_name}
+                        />
                         {group.matches.some((m) => m.match_method === "ai_auto") && (
                           <div className="mt-1.5">
                             <ConfidenceBadge
