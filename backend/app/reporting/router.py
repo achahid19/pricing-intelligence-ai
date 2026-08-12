@@ -7,7 +7,7 @@ from app.auth.dependencies import get_current_workspace
 from app.reporting import service as reporting_service
 from app.reporting.models import CompetitorReport
 from app.reporting.pdf_export import build_report_pdf
-from app.reporting.schemas import CompetitorReportOut, PipelineCancelOut, PipelineStartedOut, ReportRename
+from app.reporting.schemas import CompetitorReportOut, PipelineStartedOut, ReportRename
 from app.services.cooldown import check_cooldown
 from app.workspace.models import Workspace
 from app.db.database import get_db
@@ -52,26 +52,6 @@ async def create_report(
 
     background_tasks.add_task(reporting_service.run_full_pipeline_background, workspace.id, "manual")
     return PipelineStartedOut()
-
-
-@router.post("/pipeline/cancel", response_model=PipelineCancelOut)
-async def cancel_pipeline(
-    workspace: Workspace = Depends(get_current_workspace),
-    db: AsyncSession = Depends(get_db),
-):
-    """Requests cancellation of the currently-running pipeline (see
-    run_full_pipeline's cooperative checkpoints in reporting/service.py
-    and discovery/service.py's refresh_saved_sites) — there's nothing to
-    interrupt mid-AI-call, so this only guarantees the run stops at its
-    next checkpoint, not instantly."""
-    if workspace.pipeline_status != "running":
-        raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail="No pipeline is currently running for this workspace.",
-        )
-    workspace.pipeline_cancel_requested = True
-    await db.commit()
-    return PipelineCancelOut()
 
 
 @router.get("/reports", response_model=list[CompetitorReportOut])

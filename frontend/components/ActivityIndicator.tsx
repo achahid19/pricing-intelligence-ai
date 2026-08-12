@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Popover } from "@base-ui/react/popover";
-import { AlertCircle, Ban, Bell, CheckCircle2, Circle, Loader2, Square, X } from "lucide-react";
+import { AlertCircle, Bell, CheckCircle2, Circle, Loader2, X } from "lucide-react";
 
 import { useActivity, type ActivityEntry } from "@/lib/activity";
 import { cn } from "@/lib/utils";
@@ -17,10 +17,9 @@ export function timeAgo(ms: number): string {
   return `${Math.round(minutes / 60)}h ago`;
 }
 
-function childIcon(status: "pending" | "done" | "error" | "cancelled") {
+function childIcon(status: "pending" | "done" | "error") {
   if (status === "done") return <CheckCircle2 className="size-3 shrink-0 text-good" />;
   if (status === "error") return <AlertCircle className="size-3 shrink-0 text-danger" />;
-  if (status === "cancelled") return <Ban className="size-3 shrink-0 text-slate-soft" />;
   return <Circle className="size-3 shrink-0 text-slate-soft" />;
 }
 
@@ -30,8 +29,6 @@ export function EntryRow({ entry, onDismiss }: { entry: ActivityEntry; onDismiss
       <Loader2 className="size-4 shrink-0 animate-spin text-accent" />
     ) : entry.status === "error" ? (
       <AlertCircle className="size-4 shrink-0 text-danger" />
-    ) : entry.status === "cancelled" ? (
-      <Ban className="size-4 shrink-0 text-slate-soft" />
     ) : (
       <CheckCircle2 className="size-4 shrink-0 text-good" />
     );
@@ -51,9 +48,7 @@ export function EntryRow({ entry, onDismiss }: { entry: ActivityEntry; onDismiss
               ? "Running…"
               : entry.status === "error"
                 ? (entry.errorMessage ?? "Failed")
-                : entry.status === "cancelled"
-                  ? "Stopped"
-                  : "Done"}
+                : "Done"}
           {entry.finishedAt && ` · ${timeAgo(entry.finishedAt)}`}
         </p>
       </div>
@@ -69,17 +64,6 @@ export function EntryRow({ entry, onDismiss }: { entry: ActivityEntry; onDismiss
           </Link>
         ) : (
           body
-        )}
-        {entry.status === "running" && entry.onCancel && (
-          <button
-            type="button"
-            onClick={entry.onCancel}
-            aria-label="Stop"
-            title="Stop this run"
-            className="shrink-0 rounded p-0.5 text-slate-soft transition-colors hover:text-danger"
-          >
-            <Square className="size-3.5" />
-          </button>
         )}
         {entry.status !== "running" && (
           <button
@@ -100,11 +84,7 @@ export function EntryRow({ entry, onDismiss }: { entry: ActivityEntry; onDismiss
               <span
                 className={cn(
                   "truncate text-xs",
-                  child.status === "error"
-                    ? "text-danger"
-                    : child.status === "pending" || child.status === "cancelled"
-                      ? "text-slate-soft"
-                      : "text-slate"
+                  child.status === "error" ? "text-danger" : child.status === "pending" ? "text-slate-soft" : "text-slate"
                 )}
               >
                 {child.label}

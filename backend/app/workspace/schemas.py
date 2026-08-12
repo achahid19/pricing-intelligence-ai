@@ -19,7 +19,7 @@ KNOWN_OBJECTIVES = ["market_research", "price_alignment", "map_compliance"]
 class PipelineSubstep(BaseModel):
     id: str
     label: str
-    status: Literal["pending", "done", "error", "cancelled"]
+    status: Literal["pending", "done", "error"]
 
 
 class WorkspaceOut(BaseModel):
@@ -40,11 +40,6 @@ class WorkspaceOut(BaseModel):
     pipeline_error_message: Optional[str]
     pipeline_report_id: Optional[int]
     pipeline_substeps: Optional[list[PipelineSubstep]]
-    # True the instant a cancel request has been recorded, until the
-    # running pipeline actually reaches its next checkpoint and stops —
-    # lets the frontend show a transient "Stopping…" state rather than
-    # nothing happening for up to several seconds.
-    pipeline_cancel_requested: bool
     product_tour_completed_at: Optional[datetime]
     onboarding_completed: bool
     created_at: datetime

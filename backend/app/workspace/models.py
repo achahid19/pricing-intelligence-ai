@@ -54,7 +54,7 @@ class Workspace(Base):
     # Only ever tracks the single most-recent run, not a history — full
     # detail already lives in DiscoveryRun/CompetitorReport for anyone who
     # digs further.
-    pipeline_status: Mapped[str | None] = mapped_column(Text, nullable=True)  # "running"|"completed"|"failed"|"cancelled"
+    pipeline_status: Mapped[str | None] = mapped_column(Text, nullable=True)  # "running"|"completed"|"failed"
     pipeline_trigger_source: Mapped[str | None] = mapped_column(Text, nullable=True)  # "onboarding"|"scheduled"
     pipeline_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pipeline_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -64,20 +64,12 @@ class Workspace(Base):
     )
     # Per-step plan/progress for the current pipeline_status="running" run
     # (or the last completed one) — a list of {"id", "label", "status"}
-    # dicts, "status" one of "pending"|"done"|"error"|"cancelled". Rebuilt
-    # from scratch at the start of every run_full_pipeline() call, not
-    # accumulated across runs. Not wrapped in SQLAlchemy's MutableList —
-    # every writer reassigns the whole list rather than mutating in place,
-    # same reasoning as objectives_selected above never needing that wrapper.
+    # dicts, "status" one of "pending"|"done"|"error". Rebuilt from scratch
+    # at the start of every run_full_pipeline() call, not accumulated
+    # across runs. Not wrapped in SQLAlchemy's MutableList — every writer
+    # reassigns the whole list rather than mutating in place, same
+    # reasoning as objectives_selected above never needing that wrapper.
     pipeline_substeps: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
-    # Set by POST /reporting/pipeline/cancel while pipeline_status=="running";
-    # checked cooperatively at natural checkpoints in run_full_pipeline and
-    # discovery/service.py's refresh_saved_sites (after the current step,
-    # never mid-AI-call — there's no way to interrupt an in-flight request
-    # to the AI provider, only to skip starting the next one). Reset to
-    # False at the start of every new run, so a stale request from a
-    # previous run can't immediately cancel this one.
-    pipeline_cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Set the first time the interactive first-run product tour ends, by
     # finishing OR explicitly skipping — both count as "seen," so it never

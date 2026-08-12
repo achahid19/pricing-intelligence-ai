@@ -41,14 +41,7 @@ export function PipelineStatusPoller() {
       try {
         const ws = await api.workspace.me();
         if (cancelled || !ws.pipeline_status || !ws.pipeline_started_at) return;
-        const status =
-          ws.pipeline_status === "running"
-            ? "running"
-            : ws.pipeline_status === "completed"
-              ? "done"
-              : ws.pipeline_status === "cancelled"
-                ? "cancelled"
-                : "error";
+        const status = ws.pipeline_status === "running" ? "running" : ws.pipeline_status === "completed" ? "done" : "error";
         syncEntry({
           id: ENTRY_ID,
           label: LABEL_BY_TRIGGER[ws.pipeline_trigger_source ?? ""] ?? "Automated pipeline",
@@ -58,17 +51,6 @@ export function PipelineStatusPoller() {
           finishedAt: ws.pipeline_finished_at ? new Date(ws.pipeline_finished_at).getTime() : undefined,
           errorMessage: ws.pipeline_error_message ?? undefined,
           children: ws.pipeline_substeps ?? undefined,
-          // Only offered while actually running and not already requested
-          // — cooperative cancellation (see reporting/service.py's
-          // checkpoints), so there's nothing useful to click once a stop
-          // has already been recorded and is just waiting for the next
-          // checkpoint.
-          onCancel:
-            ws.pipeline_status === "running" && !ws.pipeline_cancel_requested
-              ? () => {
-                  api.reporting.cancelPipeline().catch((err) => console.error("Failed to cancel pipeline", err));
-                }
-              : undefined,
         });
       } catch {
         // A failed status check isn't itself pipeline news — just skip

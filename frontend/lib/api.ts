@@ -75,7 +75,7 @@ export interface Workspace {
   // workspace's first-ever product — null until then, never reset.
   onboarding_pipeline_triggered_at: string | null;
   // Live status of the most recent automated pipeline run (see
-  // lib/pipelineStatus.tsx) — "running"|"completed"|"failed"|"cancelled"|null.
+  // lib/pipelineStatus.tsx) — "running"|"completed"|"failed"|null.
   pipeline_status: string | null;
   pipeline_trigger_source: string | null;
   pipeline_started_at: string | null;
@@ -86,11 +86,7 @@ export interface Workspace {
   // compatible with lib/activity.tsx's ActivityChild on purpose, so
   // pipelineStatus.tsx can pass this straight through as an entry's
   // children with no reshaping.
-  pipeline_substeps: { id: string; label: string; status: "pending" | "done" | "error" | "cancelled" }[] | null;
-  // True from the moment POST /reporting/pipeline/cancel is called until
-  // the run actually reaches its next checkpoint and stops — see
-  // pipelineStatus.tsx for how this drives a transient "Stopping…" state.
-  pipeline_cancel_requested: boolean;
+  pipeline_substeps: { id: string; label: string; status: "pending" | "done" | "error" }[] | null;
   // Set the first time the interactive first-run tour (lib/productTour.tsx)
   // ends, by finishing or explicitly skipping — never reset by that alone.
   product_tour_completed_at: string | null;
@@ -640,9 +636,6 @@ export const api = {
     // is what actually carries this forward, same as the other two
     // trigger points (onboarding, scheduled).
     create: () => request<{ detail: string }>("/reporting/reports", { method: "POST" }),
-    // Cooperative — the run stops at its next checkpoint, not instantly.
-    // See lib/pipelineStatus.tsx for how this surfaces in the Activity UI.
-    cancelPipeline: () => request<{ detail: string }>("/reporting/pipeline/cancel", { method: "POST" }),
     list: () => request<CompetitorReport[]>("/reporting/reports"),
     get: (id: number) => request<CompetitorReport>(`/reporting/reports/${id}`),
     delete: (id: number) => request<void>(`/reporting/reports/${id}`, { method: "DELETE" }),
