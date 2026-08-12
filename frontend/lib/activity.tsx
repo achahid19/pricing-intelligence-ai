@@ -30,6 +30,11 @@ export interface ActivityChild {
 }
 
 export interface ActivityEntry {
+  // A unique key PER RUN, not per action-type — two separate report
+  // generations, or two separate "discover products for site 5" calls,
+  // each get their own ActivityEntry rather than the second silently
+  // overwriting the first. See track()/syncEntry() below for how this is
+  // derived from the caller's (stable, per-type) id.
   id: string;
   label: string;
   href?: string;
@@ -64,13 +69,23 @@ export interface SyncedActivityEntry {
 
 interface ActivityContextValue {
   entries: ActivityEntry[];
+  // `id` here is a stable per ACTION-TYPE key (e.g. "ai-describe",
+  // `discover-products-${siteId}`) — every existing call site keeps
+  // passing exactly that, unchanged. track() itself turns it into a
+  // unique per-run storage key internally, so calling the same action
+  // twice produces two separate history entries instead of the second
+  // silently overwriting the first.
   track<T>(id: string, label: string, promise: Promise<T>, opts?: { href?: string }): Promise<T>;
   // For state that isn't a promise this app made — a server-side process
   // (the automated pipeline, see lib/pipelineStatus.tsx) polled rather than
-  // awaited directly. Idempotent: calling it repeatedly with the same
-  // snapshot (e.g. every poll while nothing's changed) is a no-op, and
-  // won't resurrect an entry the user already dismissed for that same
-  // finish — only a genuinely new run (a different finishedAt) does.
+  // awaited directly. `entry.id` is likewise the stable per-type key
+  // ("automated-pipeline"); combined with `entry.startedAt` (unique per
+  // real run) to derive that run's own storage key, so repeat polls of
+  // the SAME run update one entry in place while a genuinely new run
+  // (different startedAt) gets its own history row. Idempotent: calling
+  // it repeatedly with the same snapshot (e.g. every poll while nothing's
+  // changed) is a no-op, and won't resurrect a run the user already
+  // dismissed.
   syncEntry(entry: SyncedActivityEntry): void;
   dismiss(id: string): void;
   markAllSeen(): void;
@@ -90,33 +105,36 @@ const FINISHED_TTL_MS = 24 * 60 * 60 * 1000;
 export function ActivityProvider({ children }: { children: React.ReactNode }) {
   const [entries, setEntries] = useState<Record<string, ActivityEntry>>({});
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  // One token per id, bumped on every track() call for that id — a
-  // promise's resolution only applies if it's still the most recent call
-  // for that id, so a stale/superseded run can't clobber a newer one's
-  // state (e.g. a rejected double-click retry resolving after the real run).
-  const tokens = useRef<Record<string, symbol>>({});
-  // id -> the finishedAt of the last dismissal for that id — lets syncEntry
-  // (unlike track(), which only ever fires once per real action) tell "the
-  // user already dismissed this exact finish" apart from "a new run
-  // finished since," since a poller will otherwise keep re-observing the
-  // same server-side finished state on every poll.
-  const dismissedFinishes = useRef<Record<string, number | undefined>>({});
+  // Monotonic counter used to turn track()'s caller-supplied (stable,
+  // per-action-TYPE) id into a unique-per-invocation storage key — two
+  // calls with the same type id, even back to back, get distinct keys
+  // and therefore distinct history entries. This also makes the old
+  // per-id "token" staleness guard unnecessary: since each call now owns
+  // its own key, a resolving promise can never clobber a different
+  // call's entry the way two same-typed calls sharing one key used to.
+  const runSeq = useRef(0);
+  // Storage keys that have been explicitly dismissed. A run's key already
+  // encodes its own identity (see track()/syncEntry()), so remembering
+  // "this exact key was dismissed" is enough to stop a poller from
+  // resurrecting it the next time it re-observes the same server-side
+  // finished state — no per-run bookkeeping needed beyond the key itself.
+  const dismissedKeys = useRef<Set<string>>(new Set());
 
-  const clearTimer = useCallback((id: string) => {
-    if (timers.current[id]) {
-      clearTimeout(timers.current[id]);
-      delete timers.current[id];
+  const clearTimer = useCallback((key: string) => {
+    if (timers.current[key]) {
+      clearTimeout(timers.current[key]);
+      delete timers.current[key];
     }
   }, []);
 
   const dismiss = useCallback(
-    (id: string) => {
-      clearTimer(id);
+    (key: string) => {
+      clearTimer(key);
+      dismissedKeys.current.add(key);
       setEntries((prev) => {
-        if (!(id in prev)) return prev;
-        dismissedFinishes.current[id] = prev[id].finishedAt;
+        if (!(key in prev)) return prev;
         const next = { ...prev };
-        delete next[id];
+        delete next[key];
         return next;
       });
     },
@@ -125,34 +143,30 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
 
   const track = useCallback(
     <T,>(id: string, label: string, promise: Promise<T>, opts?: { href?: string }): Promise<T> => {
-      const token = Symbol(id);
-      tokens.current[id] = token;
-      clearTimer(id);
+      const key = `${id}-${++runSeq.current}`;
       setEntries((prev) => ({
         ...prev,
-        [id]: { id, label, href: opts?.href, status: "running", startedAt: Date.now(), seen: true },
+        [key]: { id: key, label, href: opts?.href, status: "running", startedAt: Date.now(), seen: true },
       }));
 
       const scheduleAutoClear = () => {
-        timers.current[id] = setTimeout(() => dismiss(id), FINISHED_TTL_MS);
+        timers.current[key] = setTimeout(() => dismiss(key), FINISHED_TTL_MS);
       };
 
       return promise.then(
         (result) => {
-          if (tokens.current[id] !== token) return result;
           setEntries((prev) => ({
             ...prev,
-            [id]: { ...prev[id], status: "done", finishedAt: Date.now(), seen: false },
+            [key]: { ...prev[key], status: "done", finishedAt: Date.now(), seen: false },
           }));
           scheduleAutoClear();
           return result;
         },
         (err) => {
-          if (tokens.current[id] !== token) throw err;
           setEntries((prev) => ({
             ...prev,
-            [id]: {
-              ...prev[id],
+            [key]: {
+              ...prev[key],
               status: "error",
               finishedAt: Date.now(),
               errorMessage: err instanceof Error ? err.message : "Failed",
@@ -164,24 +178,25 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
         }
       );
     },
-    [clearTimer, dismiss]
+    [dismiss]
   );
 
   const syncEntry = useCallback(
     (entry: SyncedActivityEntry) => {
-      // A dismissed finish shouldn't reappear just because the poller
-      // observes the exact same server-side state again — but a genuinely
-      // new run (different finishedAt, or still running) always shows.
-      if (
-        entry.status !== "running" &&
-        dismissedFinishes.current[entry.id] !== undefined &&
-        dismissedFinishes.current[entry.id] === entry.finishedAt
-      ) {
+      // entry.startedAt is set once, server-side, when a real run starts
+      // (Workspace.pipeline_started_at) and never changes for that run —
+      // combined with the caller's stable type id, this is already a
+      // unique, stable-for-the-run key: repeat polls of the SAME run
+      // land on the same key, a genuinely new run gets a new one.
+      const key = `${entry.id}-${entry.startedAt}`;
+      // A dismissed run shouldn't reappear just because the poller
+      // observes the exact same server-side state again.
+      if (entry.status !== "running" && dismissedKeys.current.has(key)) {
         return;
       }
       setEntries((prev) => {
-        const existing = prev[entry.id];
-        const isNewFinish = entry.status !== "running" && (!existing || existing.finishedAt !== entry.finishedAt);
+        const existing = prev[key];
+        const isNewFinish = entry.status !== "running" && (!existing || existing.status === "running");
         const seen = entry.status === "running" ? true : isNewFinish ? false : (existing?.seen ?? false);
         // JSON comparison, not reference equality — pipelineStatus.tsx
         // builds a fresh array on every poll even when nothing in it
@@ -199,10 +214,10 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
           return prev; // nothing actually changed — skip the re-render
         }
         if (isNewFinish) {
-          clearTimer(entry.id);
-          timers.current[entry.id] = setTimeout(() => dismiss(entry.id), FINISHED_TTL_MS);
+          clearTimer(key);
+          timers.current[key] = setTimeout(() => dismiss(key), FINISHED_TTL_MS);
         }
-        return { ...prev, [entry.id]: { ...entry, seen } };
+        return { ...prev, [key]: { ...entry, id: key, seen } };
       });
     },
     [clearTimer, dismiss]
