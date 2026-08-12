@@ -608,6 +608,14 @@ MAX_CONCURRENT_SITE_REFRESHES = 4
 # documented single-replica deployment assumption.
 
 
+async def _cancel_requested(db: AsyncSession, workspace_id: int) -> bool:
+    """A targeted column read (not a full Workspace fetch) — called from
+    inside a concurrent site task's own session, so this must stay cheap
+    and side-effect-free rather than touching that session's identity map
+    with a full ORM object."""
+    return bool(await db.scalar(select(Workspace.pipeline_cancel_requested).where(Workspace.id == workspace_id)))
+
+
 async def refresh_saved_sites(
     db: AsyncSession,
     workspace_id: int,
@@ -640,7 +648,7 @@ async def refresh_saved_sites(
     downstream" principle the scheduler already applies per-workspace,
     just one level deeper here (per-step within one workspace's run).
 
-    on_step, when given, is awaited as (step_id, "done"|"error") right
+    on_step, when given, is awaited as (step_id, "done"|"error"|"cancelled") right
     after each site's product-discovery and auto-match calls resolve —
     run_full_pipeline uses this to flip Workspace.pipeline_substeps
     entries live as the run progresses. Since sites now run concurrently,
@@ -687,6 +695,18 @@ async def refresh_saved_sites(
                     if site is None:
                         return  # deleted between enumeration and this task's turn
 
+                    # Checked here (before this task's first AI call) rather
+                    # than only once up front in refresh_saved_sites: a site
+                    # still waiting on the semaphore when cancellation is
+                    # requested should never start its work at all, not just
+                    # sites enumerated after the check. Marks BOTH of this
+                    # site's steps "cancelled" — neither has run yet.
+                    if await _cancel_requested(site_db, workspace_id):
+                        if on_step:
+                            await on_step(f"site-{site.id}-products", "cancelled")
+                            await on_step(f"site-{site.id}-match", "cancelled")
+                        return
+
                     try:
                         await run_site_product_discovery(site_db, workspace_id, site)
                         if on_step:
@@ -706,6 +726,15 @@ async def refresh_saved_sites(
                         # CompetitorProducts this site already has from earlier
                         # runs — matching against the existing catalog is still
                         # worthwhile.
+
+                    # A second checkpoint between the two AI calls: the
+                    # products call above can take a while, long enough for
+                    # cancellation to arrive mid-site — the match call is
+                    # still skippable even though products already ran.
+                    if await _cancel_requested(site_db, workspace_id):
+                        if on_step:
+                            await on_step(f"site-{site.id}-match", "cancelled")
+                        return
 
                     try:
                         await run_site_auto_match(

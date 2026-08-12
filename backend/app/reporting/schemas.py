@@ -242,3 +242,11 @@ class PipelineStartedOut(BaseModel):
     the frontend for the other two trigger points) is what actually
     carries progress and the eventual report id forward."""
     detail: str = "Report generation started."
+
+
+class PipelineCancelOut(BaseModel):
+    """POST /reporting/pipeline/cancel's response — the run doesn't stop
+    immediately (see run_full_pipeline's cooperative cancellation
+    checkpoints), so this just confirms the request was recorded; the
+    poller picks up pipeline_status flipping to "cancelled" from there."""
+    detail: str = "Cancellation requested."

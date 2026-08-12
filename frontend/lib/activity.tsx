@@ -21,12 +21,12 @@
 // call site keeps its own error handling exactly as before.
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 
-export type ActivityStatus = "running" | "done" | "error";
+export type ActivityStatus = "running" | "done" | "error" | "cancelled";
 
 export interface ActivityChild {
   id: string;
   label: string;
-  status: "pending" | "done" | "error";
+  status: "pending" | "done" | "error" | "cancelled";
 }
 
 export interface ActivityEntry {
@@ -43,10 +43,10 @@ export interface ActivityEntry {
   finishedAt?: number;
   errorMessage?: string;
   // Whether the user has opened the popover since this entry last settled
-  // to "done"/"error" — the basis for the Sidebar bell's passive dot (see
-  // ActivityIndicator.tsx). Irrelevant while "running": the spinner+count
-  // is already a visible signal for that state, so this only tracks
-  // "finished and not yet looked at."
+  // to "done"/"error"/"cancelled" — the basis for the Sidebar bell's
+  // passive dot (see ActivityIndicator.tsx). Irrelevant while "running":
+  // the spinner+count is already a visible signal for that state, so this
+  // only tracks "finished and not yet looked at."
   seen: boolean;
   // Sub-steps of a server-tracked pipeline run (see lib/pipelineStatus.tsx)
   // rendered nested under this one entry — e.g. "Discovering products —
@@ -54,6 +54,14 @@ export interface ActivityEntry {
   // syncEntry(); track()-driven entries (a single frontend promise) never
   // have a meaningful sub-step breakdown, so this stays undefined for them.
   children?: ActivityChild[];
+  // Present only for entries backed by real server-side cancellation
+  // support (currently just the automated pipeline, wired in
+  // lib/pipelineStatus.tsx) — track()-driven entries never set this,
+  // since there's no way to interrupt an already-in-flight single HTTP
+  // request short of AbortController + backend disconnect-handling that
+  // doesn't exist here yet. ActivityIndicator.tsx only renders a Stop
+  // button when this is present AND status is "running".
+  onCancel?: () => void;
 }
 
 export interface SyncedActivityEntry {
@@ -65,6 +73,7 @@ export interface SyncedActivityEntry {
   finishedAt?: number;
   errorMessage?: string;
   children?: ActivityChild[];
+  onCancel?: () => void;
 }
 
 interface ActivityContextValue {

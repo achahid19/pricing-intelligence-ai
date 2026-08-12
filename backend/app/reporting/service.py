@@ -52,6 +52,16 @@ class NoTrackedMatchesError(Exception):
     problem this data source was added to fix."""
 
 
+class PipelineCancelledError(Exception):
+    """Raised by run_full_pipeline itself once it observes Workspace.
+    pipeline_cancel_requested at one of its own checkpoints (after the
+    discovery step, after refresh_saved_sites' fan-out) — never raised
+    from inside a single site's task (see discovery/service.py's
+    _process_site, which marks its own steps "cancelled" and returns
+    normally instead, so one site's cancellation-detection can't look
+    like an unexpected per-site failure to the rest of the fan-out)."""
+
+
 async def _get_active_config(db: AsyncSession, workspace_id: int) -> AiProviderConfig:
     """Same inline lookup discovery/router.py's create_discovery_run already
     does before building its own row (rather than reaching into
@@ -581,6 +591,10 @@ async def run_full_pipeline(db: AsyncSession, workspace: Workspace, trigger_sour
     workspace.pipeline_finished_at = None
     workspace.pipeline_error_message = None
     workspace.pipeline_report_id = None
+    # A stale True from a previous (already-finished) run must never
+    # cancel this new one — reset unconditionally at the top, same as
+    # every other pipeline_* field above.
+    workspace.pipeline_cancel_requested = False
     # The full plan isn't known yet (which sites will be saved depends on
     # the discovery step about to run) — seeded with just the first step so
     # a poller sees *something* immediately; the per-site steps get
@@ -623,6 +637,12 @@ async def run_full_pipeline(db: AsyncSession, workspace: Workspace, trigger_sour
             ws.pipeline_substeps = steps
             await substep_db.commit()
 
+    async def _cancel_requested() -> bool:
+        # A targeted column read, not db.refresh(workspace) — this can be
+        # called from inside the discovery retry's sleep too, where we
+        # don't want to touch the outer object's other attributes at all.
+        return bool(await db.scalar(select(Workspace.pipeline_cancel_requested).where(Workspace.id == workspace.id)))
+
     try:
         try:
             try:
@@ -635,6 +655,8 @@ async def run_full_pipeline(db: AsyncSession, workspace: Workspace, trigger_sour
             except Exception:
                 logger.warning("pipeline site discovery failed for workspace %s, retrying once in 20s", workspace.id)
                 await asyncio.sleep(20)
+                if await _cancel_requested():
+                    raise PipelineCancelledError()
                 try:
                     await run_site_discovery(
                         db, workspace, mode="competitor", auto_save_threshold=PIPELINE_AUTO_SAVE_THRESHOLD
@@ -645,6 +667,13 @@ async def run_full_pipeline(db: AsyncSession, workspace: Workspace, trigger_sour
                 except Exception:
                     logger.exception("pipeline site discovery failed for workspace %s after retry", workspace.id)
                     await _mark_substep("discovery", "error")
+
+            # Checked once here — after discovery, before the (potentially
+            # multi-minute) per-site fan-out — rather than only at the very
+            # end, so a cancel requested during/right after discovery skips
+            # the expensive part entirely instead of running it anyway.
+            if await _cancel_requested():
+                raise PipelineCancelledError()
 
             # Built from the CURRENT saved-site list, not whatever existed
             # before this function started — includes anything the
@@ -665,13 +694,29 @@ async def run_full_pipeline(db: AsyncSession, workspace: Workspace, trigger_sour
                 await _mark_substep(f"site-{site.id}-products", "pending", label=f"Discovering products — {name}")
                 await _mark_substep(f"site-{site.id}-match", "pending", label=f"Matching — {name}")
 
+            # refresh_saved_sites does its OWN per-site cancellation checks
+            # (see discovery/service.py's _process_site) — any site whose
+            # task hasn't started yet by the time cancellation is requested
+            # marks its own two steps "cancelled" and returns, rather than
+            # this function trying to reach into an in-progress fan-out.
             await refresh_saved_sites(
                 db, workspace.id, auto_confirm_threshold=PIPELINE_AUTO_CONFIRM_THRESHOLD, on_step=_mark_substep
             )
 
+            if await _cancel_requested():
+                await _mark_substep("report", "cancelled", label="Writing the report")
+                raise PipelineCancelledError()
+
             await _mark_substep("report", "pending", label="Writing the report")
             report = await generate_report(db, workspace, trigger_source=trigger_source)
             await _mark_substep("report", "done")
+        except PipelineCancelledError:
+            await db.refresh(workspace)
+            workspace.pipeline_status = "cancelled"
+            workspace.pipeline_finished_at = datetime.now(timezone.utc)
+            workspace.pipeline_cancel_requested = False
+            await db.commit()
+            raise
         except Exception as exc:
             # Discard this object's now-stale in-memory pipeline_substeps
             # (last touched before the concurrent phase began) so this
@@ -713,5 +758,7 @@ async def run_full_pipeline_background(workspace_id: int, trigger_source: str) -
             logger.info("Skipping %s report for workspace %s: no trackable confirmed matches yet", trigger_source, workspace_id)
         except ai_client.NoActiveProviderError:
             logger.info("Skipping %s report for workspace %s: no active AI provider configured", trigger_source, workspace_id)
+        except PipelineCancelledError:
+            logger.info("%s pipeline for workspace %s was cancelled by the user", trigger_source, workspace_id)
         except Exception:
             logger.exception("automated pipeline failed for workspace %s", workspace_id)
