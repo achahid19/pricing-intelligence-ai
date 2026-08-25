@@ -13,4 +13,12 @@ COPY . .
 # --reload here: that's a dev-only convenience (see docker-compose.yml's
 # command: override, which restores it for local dev without needing a
 # second Dockerfile for production).
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+#
+# Migrations run here, chained before uvicorn, rather than via Render's
+# Pre-Deploy Command — that feature is paid-plan-only, unavailable on the
+# free tier this app deploys to. alembic upgrade head is a no-op once
+# already current, so running it on every container start (including every
+# free-tier wake-from-sleep) is safe, not just on the first deploy. If it
+# fails, uvicorn deliberately never starts — running with an out-of-sync
+# schema silently would be worse than the service staying down.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
