@@ -19,6 +19,11 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    # The image's own CMD drops --reload (production/Render doesn't want a
+    # file-watcher process) and binds to $PORT instead of a fixed 8000 —
+    # this override restores hot-reload for local dev, where ./backend is
+    # volume-mounted live and $PORT is never set.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       db:
         condition: service_healthy

@@ -1,3 +1,14 @@
+// Set on Vercel to the deployed backend's own URL (e.g. https://x.onrender.com)
+// so the browser calls it directly instead of going through Next.js's own
+// rewrite proxy — that proxy is itself a Vercel serverless function, so it's
+// subject to Vercel's own execution timeout regardless of how long the real
+// backend is willing to wait, and this app's AI calls routinely run well
+// past that. Empty locally (Docker Compose), where the existing rewrite in
+// next.config.ts already forwards /api/v1/* to the backend container with a
+// deliberately raised 120s timeout — same reasoning, just enforced at a
+// layer Vercel doesn't let you configure.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+
 const TOKEN_KEY = "pia_token";
 // The assistant widget's own conversation history — see lib/assistantChat.tsx.
 // Cleared on logout alongside the token so a conversation never leaks from
@@ -30,7 +41,7 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
-  const res = await fetch(`/api/v1${path}`, {
+  const res = await fetch(`${API_BASE}/api/v1${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -592,7 +603,7 @@ export const api = {
       request<Product>(`/products/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
     delete: (id: number) => request<void>(`/products/${id}`, { method: "DELETE" }),
     deleteAll: () => request<{ deleted: number }>("/products", { method: "DELETE" }),
-    templateUrl: "/api/v1/products/import/template",
+    templateUrl: `${API_BASE}/api/v1/products/import/template`,
     async importFile(file: File): Promise<ImportResult> {
       // Bypasses the shared request() helper — it always sets
       // Content-Type: application/json, but a multipart upload needs the
@@ -600,7 +611,7 @@ export const api = {
       const token = getToken();
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/api/v1/products/import", {
+      const res = await fetch(`${API_BASE}/api/v1/products/import`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: formData,
@@ -616,7 +627,7 @@ export const api = {
       const token = getToken();
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/api/v1/products/ai-describe", {
+      const res = await fetch(`${API_BASE}/api/v1/products/ai-describe`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: formData,
@@ -705,7 +716,7 @@ export const api = {
     // the bytes directly and triggers the download via a synthetic anchor.
     async downloadPdf(id: number, filenameHint?: string): Promise<void> {
       const token = getToken();
-      const res = await fetch(`/api/v1/reporting/reports/${id}/export.pdf`, {
+      const res = await fetch(`${API_BASE}/api/v1/reporting/reports/${id}/export.pdf`, {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (!res.ok) {
