@@ -1,4 +1,8 @@
 const TOKEN_KEY = "pia_token";
+// The assistant widget's own conversation history — see lib/assistantChat.tsx.
+// Cleared on logout alongside the token so a conversation never leaks from
+// one account into the next login on a shared device/browser.
+export const ASSISTANT_CHAT_STORAGE_KEY = "pia_assistant_chat";
 
 // JWT stored in localStorage — simplest standard fit for a stateless-JWT
 // setup (see docs/DECISIONS.md for the tradeoff vs. httpOnly cookies).
@@ -13,6 +17,7 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(ASSISTANT_CHAT_STORAGE_KEY);
 }
 
 export class ApiError extends Error {
@@ -218,6 +223,13 @@ export interface ModelInfo {
 }
 
 export type ModelCatalog = Record<AiProvider, ModelInfo[]>;
+
+// A gentle nudge, not a hard gate — note is only ever present when
+// in_scope is false, see backend/app/workspace/schemas.py's ContextReview.
+export interface ContextReview {
+  in_scope: boolean;
+  note: string | null;
+}
 
 export interface AiProviderConfig {
   id: number;
@@ -496,6 +508,50 @@ export interface CompetitorReport {
   content: ReportContent;
 }
 
+// Client-side chat history entry — deliberately just plain text turns, see
+// backend/app/assistant/schemas.py's ChatMessage. A resolved tool proposal
+// (approved+result, or dismissed) gets serialized into a synthetic entry
+// here by the caller before the next send, so the model has memory of what
+// it already proposed.
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export type AssistantToolCallStatus = "proposed" | "executed" | "dismissed" | "failed";
+
+// Human-readable summary of a proposed tool's arguments, built server-side
+// at propose time (e.g. a resolved site name instead of a bare id) — never
+// raw JSON arguments, see backend/app/assistant/models.py's AssistantToolCall.
+export type ToolCallDisplay = Record<string, string | number>;
+
+export interface AssistantMessageResponse {
+  type: "message";
+  text: string;
+}
+
+export interface AssistantToolProposalResponse {
+  type: "tool_proposal";
+  call_id: number;
+  tool_name: string;
+  display: ToolCallDisplay;
+  tier: ModelTier;
+}
+
+export type AssistantTurnResponse = AssistantMessageResponse | AssistantToolProposalResponse;
+
+export interface AssistantToolCall {
+  id: number;
+  tool_name: string;
+  status: AssistantToolCallStatus;
+  display: ToolCallDisplay;
+  tier: ModelTier;
+  result_summary: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string;
+  executed_at: string | null;
+}
+
 export const api = {
   auth: {
     async signup(email: string, password: string, workspaceName: string) {
@@ -524,6 +580,9 @@ export const api = {
     listAiProviders: () => request<AiProviderConfig[]>("/workspace/ai-provider"),
     setAiProvider: (payload: { provider: AiProvider; api_key?: string; model_override?: string | null }) =>
       request<AiProviderConfig>("/workspace/ai-provider", { method: "POST", body: JSON.stringify(payload) }),
+    // Reviews the workspace's OWN already-stored objectives_note/market —
+    // no request body, see workspace/router.py's review_context.
+    reviewContext: () => request<ContextReview>("/workspace/review-context", { method: "POST" }),
   },
   products: {
     list: () => request<Product[]>("/products"),
@@ -665,5 +724,22 @@ export const api = {
       a.remove();
       URL.revokeObjectURL(url);
     },
+  },
+  assistant: {
+    sendMessage: (messages: ChatMessage[]) =>
+      request<AssistantTurnResponse>("/assistant/messages", {
+        method: "POST",
+        body: JSON.stringify({ messages }),
+      }),
+    approveToolCall: (callId: number) =>
+      request<AssistantToolCall>(`/assistant/tool-calls/${callId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: "approve" }),
+      }),
+    dismissToolCall: (callId: number) =>
+      request<AssistantToolCall>(`/assistant/tool-calls/${callId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: "dismiss" }),
+      }),
   },
 };

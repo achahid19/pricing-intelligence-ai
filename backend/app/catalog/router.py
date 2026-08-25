@@ -2,7 +2,6 @@ import asyncio
 import csv
 import io
 import logging
-from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -10,10 +9,11 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, status
 from fastapi.responses import Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_workspace
+from app.catalog import service as catalog_service
 from app.catalog.models import Product, ProductSnapshot
 from app.catalog.schemas import (
     AiDescribeOut,
@@ -29,7 +29,6 @@ from app.catalog.schemas import (
 )
 from app.db.database import get_db
 from app.discovery import service as discovery_service
-from app.reporting import service as reporting_service
 from app.services import ai_client, url_check
 from app.services.storage import save_image
 from app.services.text import normalize_domain, normalize_product_name, strip_citations
@@ -38,30 +37,6 @@ from app.workspace.models import Workspace
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-async def _maybe_start_onboarding_pipeline(
-    db: AsyncSession, background_tasks: BackgroundTasks, workspace: Workspace
-) -> None:
-    """The "0 -> >0" trigger: the very first time a workspace's catalog
-    goes from empty to non-empty (via any of the three product-creation
-    paths below), kick off the automated discover-match-report pipeline
-    (reporting/service.py's run_full_pipeline) in the background, once,
-    ever. Guarded by Workspace.onboarding_pipeline_triggered_at — set (and
-    committed) here before enqueueing, not after the pipeline finishes, so
-    a second product landing while the first pipeline is still running
-    can't double-trigger it. Lives here rather than in discovery/service.py
-    to avoid a circular import: reporting/service.py already imports
-    discovery/service.py, so the reverse would be circular, and this
-    helper needs both."""
-    if workspace.onboarding_pipeline_triggered_at is not None:
-        return
-    count = await db.scalar(select(func.count(Product.id)).where(Product.workspace_id == workspace.id))
-    if not count:
-        return
-    workspace.onboarding_pipeline_triggered_at = datetime.now(timezone.utc)
-    await db.commit()
-    background_tasks.add_task(reporting_service.run_full_pipeline_background, workspace.id, "onboarding")
 
 
 @router.get("", response_model=list[ProductOut])
@@ -82,16 +57,7 @@ async def create_product(
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ):
-    product = Product(workspace_id=workspace.id, import_source="manual", **payload.model_dump())
-    # A starting-price snapshot, same reasoning as every creation path
-    # below — without one, a price edited before the first report has no
-    # baseline to diff against, even though the product clearly existed.
-    product.snapshots.append(ProductSnapshot(workspace_id=workspace.id, price=product.price))
-    db.add(product)
-    await db.commit()
-    await db.refresh(product)
-    await _maybe_start_onboarding_pipeline(db, background_tasks, workspace)
-    return product
+    return await catalog_service.create_product(db, background_tasks, workspace, payload)
 
 
 @router.get("/{product_id}", response_model=ProductOut)
@@ -424,7 +390,7 @@ async def confirm_website_import(
     # would just spend an AI call for a guaranteed empty result.
     if created > 0:
         background_tasks.add_task(discovery_service.refresh_matches_for_workspace, workspace.id)
-        await _maybe_start_onboarding_pipeline(db, background_tasks, workspace)
+        await catalog_service.maybe_start_onboarding_pipeline(db, background_tasks, workspace)
 
     return ImportResultOut(created=created, skipped=skipped, errors=[])
 
@@ -595,6 +561,6 @@ async def import_products(
 
     if created > 0:
         background_tasks.add_task(discovery_service.refresh_matches_for_workspace, workspace.id)
-        await _maybe_start_onboarding_pipeline(db, background_tasks, workspace)
+        await catalog_service.maybe_start_onboarding_pipeline(db, background_tasks, workspace)
 
     return ImportResultOut(created=created, skipped=skipped, errors=errors)

@@ -9,13 +9,13 @@ workspace instead of a single global setting.
 import base64
 import json
 import re
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.model_catalog import default_model_for
+from app.services.model_catalog import default_model_for, tier_for_model
 from app.workspace.encryption import decrypt_key
 from app.workspace.models import AiProviderConfig
 
@@ -653,6 +653,49 @@ def _format_products_for_matching(products: list) -> str:
     return "\n".join(lines) if lines else "(none)"
 
 
+async def _run_json_prompt(config: AiProviderConfig, api_key: str, model: str, prompt: str, max_tokens: int = 2000) -> dict:
+    """Shared non-search text-in/JSON-out dispatcher — match_products and
+    generate_report_narrative each used to independently duplicate this
+    exact three-provider branch (confirmed byte-identical between the two
+    before this extraction). No web-search tool involved here — callers
+    that need one still go through _run_web_search_prompt instead; this
+    is for pure-reasoning calls only."""
+    if config.provider == "openai":
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key, timeout=_OPENAI_TIMEOUT)
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return _extract_json_object(resp.choices[0].message.content)
+
+    if config.provider == "anthropic":
+        from anthropic import AsyncAnthropic
+
+        client = AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(block.text for block in resp.content if block.type == "text")
+        return _extract_json_object(text)
+
+    if config.provider == "google":
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=3)),
+        )
+        resp = await client.aio.models.generate_content(model=model, contents=[prompt])
+        return _extract_json_object(resp.text)
+
+    raise ValueError(f"Unknown provider: {config.provider}")
+
+
 async def match_products(
     db: AsyncSession, workspace_id: int, own_products: list, competitor_products: list
 ) -> tuple[dict, Optional[int]]:
@@ -673,47 +716,13 @@ async def match_products(
         own_products=_format_products_for_matching(own_products[:_MAX_MATCH_OWN_PRODUCTS]),
         competitor_products=_format_products_for_matching(competitor_products),
     )
-
-    if config.provider == "openai":
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=api_key, timeout=_OPENAI_TIMEOUT)
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return _extract_json_object(resp.choices[0].message.content), None
-
-    if config.provider == "anthropic":
-        from anthropic import AsyncAnthropic
-
-        client = AsyncAnthropic(api_key=api_key)
-        resp = await client.messages.create(
-            model=model,
-            # 4000, not 2000: a large discovered-products batch (Cap Connect
-            # alone has 54) times a full own-catalog match pass, each with the
-            # now-required type/class rationale, can genuinely exceed 2000
-            # tokens of JSON output — a truncated response fails _extract_
-            # json_object's json.loads entirely rather than degrading
-            # gracefully, so this needs real headroom, not a tight cap.
-            max_tokens=4000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = "".join(block.text for block in resp.content if block.type == "text")
-        return _extract_json_object(text), None
-
-    if config.provider == "google":
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=3)),
-        )
-        resp = await client.aio.models.generate_content(model=model, contents=[prompt])
-        return _extract_json_object(resp.text), None
-
-    raise ValueError(f"Unknown provider: {config.provider}")
+    # 4000, not 2000: a large discovered-products batch (Cap Connect alone
+    # has 54) times a full own-catalog match pass, each with the
+    # now-required type/class rationale, can genuinely exceed 2000 tokens
+    # of JSON output — a truncated response fails _extract_json_object's
+    # json.loads entirely rather than degrading gracefully, so this needs
+    # real headroom, not a tight cap.
+    return await _run_json_prompt(config, api_key, model, prompt, max_tokens=4000), None
 
 
 # Same "hard safety cap" reasoning as _MAX_MATCH_OWN_PRODUCTS — this many
@@ -931,29 +940,281 @@ async def generate_report_narrative(
         guidance_lines=guidance_lines,
     )
 
+    return await _run_json_prompt(config, api_key, model, prompt, max_tokens=4000)
+
+
+# A gentle nudge, not a hard gate — the model is asked for a plain verdict
+# plus, only when out of scope, one short line of plain-language feedback.
+# Deliberately no "looks good!" case in the output shape: this codebase's
+# established restraint around AI narration (CLAUDE.md's "AI narrates on
+# top of deterministic data" boundary, extended here to "AI only speaks up
+# when something's actually off") means the caller never surfaces an
+# affirmation, only ever a concern.
+_CONTEXT_REVIEW_PROMPT_TEMPLATE = (
+    "A user just described their business in a free-text field on a competitor/pricing-intelligence platform. "
+    "This platform discovers competitors, tracks prices, and generates market reports — it is NOT a general "
+    "business tool, so the description only makes sense if the business plausibly has competitors and prices "
+    "worth tracking.\n\n"
+    "Objectives note (what the user typed when asked \"anything else useful?\"): {objectives_note}\n"
+    "Market/industry (free-text, since they picked \"Other\" from the industry list): {market}\n\n"
+    "Does this plausibly describe a business that competitor/pricing intelligence is relevant to? Almost "
+    "everything real qualifies — a shop, a service business, a manufacturer, a distributor. Only flag genuinely "
+    "unrelated or nonsensical text (e.g. a personal hobby with no commercial pricing angle, keyboard-mashing, "
+    "an unrelated question typed into the wrong field).\n\n"
+    "Reply with ONLY a JSON object: "
+    '{{"in_scope": true or false, "note": null or a short (1-2 sentence) plain-language explanation of what '
+    "looks off and a better way to phrase it, only present when in_scope is false}}."
+)
+
+
+async def review_business_context(
+    db: AsyncSession, workspace_id: int, objectives_note: Optional[str], market: Optional[str]
+) -> Optional[dict]:
+    """Reviews a workspace's own free-text business-context fields
+    (objectives_note, and the industry "Other" override stored in
+    `market`) for whether they plausibly describe a business this
+    platform is relevant to — neither field has any content validation
+    today (workspace/schemas.py's WorkspaceContextUpdate only bounds
+    length). Returns None immediately, no AI call made, if both fields
+    are empty — nothing to review. Otherwise returns {"in_scope": bool,
+    "note": str | None}, modeled on match_products/generate_report_
+    narrative's shape (a plain reasoning call, no web search tool).
+    Raises NoActiveProviderError if none configured."""
+    if not (objectives_note or "").strip() and not (market or "").strip():
+        return None
+
+    config = await _get_active_config(db, workspace_id)
+    api_key = decrypt_key(config.encrypted_api_key)
+    model = config.model_override or default_model_for(config.provider)
+    prompt = _CONTEXT_REVIEW_PROMPT_TEMPLATE.format(
+        objectives_note=objectives_note or "(not provided)",
+        market=market or "(not provided)",
+    )
+    return await _run_json_prompt(config, api_key, model, prompt)
+
+
+# ── Agentic assistant tool-calling dispatch ─────────────────────────────────
+#
+# The read-tool loop (execute inline, feed the result back, let the model
+# keep going) runs entirely INSIDE one call to run_assistant_turn — the
+# frontend's own `messages` history only ever holds finished user/assistant
+# text turns (see assistant/service.py), never the individual tool-call/
+# tool-result turns a provider needs mid-loop. Those are provider-native and
+# rebuilt fresh every call, consistent with this app's existing stateless,
+# fully-reconstructed-context-per-call AI architecture — there is nothing to
+# resume, so there is nothing wrong with throwing the native conversation
+# away the moment this function returns.
+#
+# A write-tool call is never executed here — this function only ever
+# recognizes one (by name, via `read_tool_names`) and returns it as a
+# proposal for the caller to validate/persist/display. See assistant/
+# service.py and assistant/models.py's AssistantToolCall for the actual
+# "AI proposes, human approves" boundary.
+
+_ASSISTANT_SYSTEM_PROMPT = (
+    "You are Apex, an AI assistant embedded in a competitor/pricing-intelligence platform. You help the "
+    "user by looking at their real, current workspace data using the read tools available, and by "
+    "proposing actions using the write tools available. You never execute a write action yourself — "
+    "every write tool you call is only a PROPOSAL a human must separately approve before anything "
+    "actually happens, so call it directly with the specific arguments needed rather than asking the "
+    "user to confirm in plain text first; the approval step happens automatically after your call. "
+    "Use read tools freely, and as many times as needed, to ground your answers in real data before "
+    "responding or proposing anything — never guess at ids, names, or counts you could look up. Keep "
+    "plain-text replies concise and specific, citing real names/numbers you actually saw via the read "
+    "tools rather than speaking in generalities. Replies render as plain text, not markdown — a plain "
+    "\"- \" list is fine, but never use **bold**/*italic* asterisks or # headers, since those render "
+    "as literal characters, not formatting."
+)
+
+_MAX_TOOL_ROUNDS = 6
+
+_ToolExecutor = Callable[[str, dict], Awaitable[dict]]
+
+
+async def _execute_read_tool_safely(execute_read_tool: _ToolExecutor, name: str, args: dict) -> dict:
+    """A failed read tool (bad args, a since-deleted row, a transient DB
+    error) is fed back to the model as an error result, not raised — so the
+    model can see what went wrong and self-correct (different args, a
+    different tool, or falling back to a plain-text answer) within the same
+    round budget, instead of the whole turn crashing on what might be a
+    single recoverable lookup."""
+    try:
+        return await execute_read_tool(name, args)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+_MAX_ROUNDS_MESSAGE = (
+    "I wasn't able to finish gathering the information needed for that within this turn — "
+    "try rephrasing or narrowing your request."
+)
+
+
+async def _run_assistant_turn_openai(
+    client, model: str, tool_defs: list[dict], history: list[dict],
+    read_tool_names: set[str], execute_read_tool: _ToolExecutor, max_rounds: int,
+) -> dict:
+    openai_tools = [
+        {"type": "function", "name": t["name"], "description": t["description"], "parameters": t["parameters"], "strict": True}
+        for t in tool_defs
+    ]
+    input_items: list = [{"role": m["role"], "content": m["content"]} for m in history]
+    for _ in range(max_rounds):
+        resp = await client.responses.create(
+            model=model,
+            instructions=_ASSISTANT_SYSTEM_PROMPT,
+            tools=openai_tools,
+            input=input_items,
+        )
+        function_calls = [item for item in resp.output if getattr(item, "type", None) == "function_call"]
+        if not function_calls:
+            return {"type": "message", "text": resp.output_text}
+        # Only ever act on the first tool call per round, even if the model
+        # requested several — treating them one at a time avoids executing
+        # multiple side-effecting proposals before the user has seen any of
+        # them, and keeps the round-trip logic below (which appends exactly
+        # one call + one result per round) simple.
+        call = function_calls[0]
+        # OpenAI's .arguments is a JSON STRING here — unlike Anthropic's
+        # .input and Google's .args below, which are already-parsed dicts.
+        # Getting this backwards is a silent, easy bug (verified against
+        # the installed SDK before writing this).
+        call_args = json.loads(call.arguments)
+        if call.name not in read_tool_names:
+            return {"type": "tool_call", "tool_name": call.name, "tool_arguments": call_args}
+        input_items.append({"type": "function_call", "call_id": call.call_id, "name": call.name, "arguments": call.arguments})
+        result = await _execute_read_tool_safely(execute_read_tool, call.name, call_args)
+        input_items.append({"type": "function_call_output", "call_id": call.call_id, "output": json.dumps(result)})
+    return {"type": "message", "text": _MAX_ROUNDS_MESSAGE}
+
+
+async def _run_assistant_turn_anthropic(
+    client, model: str, tool_defs: list[dict], history: list[dict],
+    read_tool_names: set[str], execute_read_tool: _ToolExecutor, max_rounds: int,
+) -> dict:
+    anthropic_tools = [
+        {"name": t["name"], "description": t["description"], "input_schema": t["parameters"]}
+        for t in tool_defs
+    ]
+    conv: list = [{"role": m["role"], "content": m["content"]} for m in history]
+    for _ in range(max_rounds):
+        resp = await client.messages.create(
+            model=model,
+            max_tokens=2000,
+            system=_ASSISTANT_SYSTEM_PROMPT,
+            tools=anthropic_tools,
+            messages=conv,
+        )
+        tool_uses = [b for b in resp.content if b.type == "tool_use"]
+        if not tool_uses:
+            text = "".join(b.text for b in resp.content if b.type == "text")
+            return {"type": "message", "text": text}
+        call = tool_uses[0]
+        # Anthropic's .input is already a parsed dict — unlike OpenAI's
+        # .arguments above, which is a JSON string.
+        call_args = call.input
+        if call.name not in read_tool_names:
+            return {"type": "tool_call", "tool_name": call.name, "tool_arguments": call_args}
+        # The full content list, not just the tool_use block — Anthropic
+        # rejects the next turn if any block from this assistant turn
+        # (e.g. preceding text) is dropped.
+        conv.append({"role": "assistant", "content": resp.content})
+        result = await _execute_read_tool_safely(execute_read_tool, call.name, call_args)
+        conv.append({
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": call.id, "content": json.dumps(result)}],
+        })
+    return {"type": "message", "text": _MAX_ROUNDS_MESSAGE}
+
+
+async def _run_assistant_turn_google(
+    client, model: str, tool_defs: list[dict], history: list[dict],
+    read_tool_names: set[str], execute_read_tool: _ToolExecutor, max_rounds: int,
+) -> dict:
+    from google.genai import types
+
+    function_declarations = [
+        types.FunctionDeclaration(name=t["name"], description=t["description"], parameters_json_schema=t["parameters"])
+        for t in tool_defs
+    ]
+    gen_config = types.GenerateContentConfig(
+        system_instruction=_ASSISTANT_SYSTEM_PROMPT,
+        tools=[types.Tool(function_declarations=function_declarations)],
+        # Required or the SDK tries to auto-invoke a real Python callable —
+        # there isn't one; every tool call here is handled by hand below so
+        # write tools can be intercepted as proposals instead of executed.
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+    contents: list = [
+        types.Content(role=("model" if m["role"] == "assistant" else "user"), parts=[types.Part(text=m["content"])])
+        for m in history
+    ]
+    for _ in range(max_rounds):
+        resp = await client.aio.models.generate_content(model=model, contents=contents, config=gen_config)
+        calls = resp.function_calls or []
+        if not calls:
+            return {"type": "message", "text": resp.text}
+        call = calls[0]
+        # Google's .args is already a parsed dict — same as Anthropic's
+        # .input, unlike OpenAI's .arguments above.
+        call_args = call.args
+        if call.name not in read_tool_names:
+            return {"type": "tool_call", "tool_name": call.name, "tool_arguments": call_args}
+        contents.append(resp.candidates[0].content)
+        result = await _execute_read_tool_safely(execute_read_tool, call.name, call_args)
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part(function_response=types.FunctionResponse(name=call.name, response=result))],
+            )
+        )
+    return {"type": "message", "text": _MAX_ROUNDS_MESSAGE}
+
+
+async def run_assistant_turn(
+    db: AsyncSession,
+    workspace_id: int,
+    messages: list[dict],
+    tool_defs: list[dict],
+    read_tool_names: set[str],
+    execute_read_tool: _ToolExecutor,
+) -> dict:
+    """Runs one assistant turn against the workspace's active AI provider —
+    `messages` is the client's own flat [{"role": "user"|"assistant",
+    "content": str}, ...] history (see assistant/router.py). `tool_defs` is
+    the canonical [{"name", "description", "parameters": <json schema>},
+    ...] tool list, translated to each provider's native tool-call shape
+    inside the per-provider loop functions above (see the plan's verified
+    per-provider syntax notes — OpenAI uses "parameters" via
+    responses.create, Anthropic "input_schema", Google
+    parameters_json_schema). `execute_read_tool(name, args)` is called
+    in-loop for any tool named in `read_tool_names`; anything else is
+    returned immediately as `{"type": "tool_call", "tool_name", "tool_arguments"}`
+    for the caller to validate/persist/display as a proposal rather than
+    run. Returns `{"type": "message", "text": str}` for a plain reply.
+    Every returned dict also carries "ai_provider"/"model"/"tier" — the
+    same lightweight cost-tier signal Settings' model picker shows,
+    reused here rather than building real per-call cost tracking (this
+    app has none). Raises NoActiveProviderError if none configured."""
+    config = await _get_active_config(db, workspace_id)
+    api_key = decrypt_key(config.encrypted_api_key)
+    model = config.model_override or default_model_for(config.provider)
+
     if config.provider == "openai":
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(api_key=api_key, timeout=_OPENAI_TIMEOUT)
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
+        result = await _run_assistant_turn_openai(
+            client, model, tool_defs, messages, read_tool_names, execute_read_tool, _MAX_TOOL_ROUNDS
         )
-        return _extract_json_object(resp.choices[0].message.content)
-
-    if config.provider == "anthropic":
+    elif config.provider == "anthropic":
         from anthropic import AsyncAnthropic
 
         client = AsyncAnthropic(api_key=api_key)
-        resp = await client.messages.create(
-            model=model,
-            max_tokens=4000,
-            messages=[{"role": "user", "content": prompt}],
+        result = await _run_assistant_turn_anthropic(
+            client, model, tool_defs, messages, read_tool_names, execute_read_tool, _MAX_TOOL_ROUNDS
         )
-        text = "".join(block.text for block in resp.content if block.type == "text")
-        return _extract_json_object(text)
-
-    if config.provider == "google":
+    elif config.provider == "google":
         from google import genai
         from google.genai import types
 
@@ -961,7 +1222,13 @@ async def generate_report_narrative(
             api_key=api_key,
             http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=3)),
         )
-        resp = await client.aio.models.generate_content(model=model, contents=[prompt])
-        return _extract_json_object(resp.text)
+        result = await _run_assistant_turn_google(
+            client, model, tool_defs, messages, read_tool_names, execute_read_tool, _MAX_TOOL_ROUNDS
+        )
+    else:
+        raise ValueError(f"Unknown provider: {config.provider}")
 
-    raise ValueError(f"Unknown provider: {config.provider}")
+    result["ai_provider"] = config.provider
+    result["model"] = model
+    result["tier"] = tier_for_model(config.provider, model)
+    return result

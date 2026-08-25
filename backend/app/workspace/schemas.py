@@ -60,6 +60,15 @@ class WorkspaceContextUpdate(BaseModel):
     refresh_before_report: Optional[bool] = Field(default=None)
 
 
+class ContextReview(BaseModel):
+    """Response of POST /workspace/review-context — a gentle nudge, not a
+    hard gate, so `note` is only ever present when in_scope is false;
+    there's deliberately no "looks good!" affirmation shape."""
+
+    in_scope: bool
+    note: Optional[str] = None
+
+
 class AiProviderConfigCreate(BaseModel):
     """Also used to update an existing provider config (e.g. changing just
     the model). `api_key` is optional: omit it to keep the already-stored

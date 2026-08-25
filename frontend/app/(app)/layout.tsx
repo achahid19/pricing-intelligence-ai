@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { AssistantWidget } from "@/components/assistant/AssistantWidget";
 import { ProductTourOverlay } from "@/components/ProductTourOverlay";
 import { Sidebar } from "@/components/Sidebar";
 import { api, clearToken, getToken, type Workspace } from "@/lib/api";
 import { ActivityProvider } from "@/lib/activity";
 import { AiProviderStatusProvider } from "@/lib/aiProvider";
+import { AssistantChatProvider } from "@/lib/assistantChat";
 import { PipelineStatusPoller } from "@/lib/pipelineStatus";
 import { ProductTourProvider } from "@/lib/productTour";
 
@@ -38,13 +40,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <ActivityProvider>
       <PipelineStatusPoller />
       <AiProviderStatusProvider>
-        <ProductTourProvider workspace={workspace}>
-          <ProductTourOverlay />
-          <div className="flex h-full flex-col md:flex-row">
-            <Sidebar workspaceName={workspace.name} />
-            <main className="flex-1 overflow-y-auto">{children}</main>
-          </div>
-        </ProductTourProvider>
+        <AssistantChatProvider>
+          <ProductTourProvider workspace={workspace}>
+            <ProductTourOverlay />
+            <div className="flex h-full flex-col md:flex-row">
+              <Sidebar workspaceName={workspace.name} />
+              <main className="flex-1 overflow-y-auto">{children}</main>
+            </div>
+            <AssistantWidget />
+          </ProductTourProvider>
+        </AssistantChatProvider>
       </AiProviderStatusProvider>
     </ActivityProvider>
   );

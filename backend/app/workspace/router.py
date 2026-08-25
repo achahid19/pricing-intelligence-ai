@@ -6,12 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_workspace
 from app.db.database import get_db
+from app.services import ai_client
 from app.services.model_catalog import MODEL_CATALOG
 from app.workspace.encryption import encrypt_key
 from app.workspace.models import AiProviderConfig, Workspace
 from app.workspace.schemas import (
     AiProviderConfigCreate,
     AiProviderConfigOut,
+    ContextReview,
     WorkspaceContextUpdate,
     WorkspaceOut,
 )
@@ -43,6 +45,37 @@ async def update_my_workspace(
     await db.commit()
     await db.refresh(workspace)
     return workspace
+
+
+@router.post("/review-context", response_model=ContextReview)
+async def review_context(
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reviews the workspace's OWN already-stored objectives_note/market
+    free-text fields — no request body, matching the "review what was just
+    saved" framing (see frontend/app/(app)/settings/page.tsx's two trigger
+    points: right after the first AI key is saved, and right after
+    business context is edited). A gentle nudge, not a hard gate — the
+    frontend decides whether/how to surface a false in_scope, this
+    endpoint just reports it."""
+    try:
+        review = await ai_client.review_business_context(
+            db, workspace.id, workspace.objectives_note, workspace.market
+        )
+    except ai_client.NoActiveProviderError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active AI provider configured for this workspace. Set one up in Settings first.",
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The AI provider couldn't complete the review. Try again in a moment.",
+        )
+    if review is None:
+        return ContextReview(in_scope=True, note=None)
+    return ContextReview(**review)
 
 
 @router.post("/product-tour-complete", response_model=WorkspaceOut)

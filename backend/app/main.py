@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.assistant.router import router as assistant_router
 from app.auth.router import router as auth_router
 from app.catalog.router import router as catalog_router
 from app.config import settings
@@ -44,6 +45,7 @@ app.include_router(workspace_router, prefix="/api/v1/workspace", tags=["workspac
 app.include_router(catalog_router, prefix="/api/v1/products", tags=["catalog"])
 app.include_router(discovery_router, prefix="/api/v1/discovery", tags=["discovery"])
 app.include_router(reporting_router, prefix="/api/v1/reporting", tags=["reporting"])
+app.include_router(assistant_router, prefix="/api/v1/assistant", tags=["assistant"])
 
 
 @app.get("/health")

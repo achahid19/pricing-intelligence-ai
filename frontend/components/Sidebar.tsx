@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity as ActivityIcon, FileText, LayoutGrid, LogOut, Menu, Package, Search, Settings, TrendingUp, X } from "lucide-react";
+import { Activity as ActivityIcon, Bot, FileText, LayoutGrid, LogOut, Menu, Package, Search, Settings, TrendingUp, X } from "lucide-react";
 
 import { ActivityIndicator } from "@/components/ActivityIndicator";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -11,6 +11,13 @@ import { api, clearToken } from "@/lib/api";
 import { useActivity } from "@/lib/activity";
 import { useProductTour } from "@/lib/productTour";
 
+// "Apex" is the product name for the AI assistant (the route itself stays
+// /assistant — functional/internal, not part of the branding). The nav
+// link opens the full-page, wider-focus view of the same conversation the
+// floating widget (components/assistant/AssistantWidget.tsx) shows
+// everywhere else — both read/write the shared AssistantChatProvider
+// context, so it's one conversation either way, not two that could drift
+// apart.
 const NAV = [
   { href: "/", label: "Home", icon: LayoutGrid },
   { href: "/catalog", label: "Catalog", icon: Package },
@@ -18,6 +25,7 @@ const NAV = [
   { href: "/tracked", label: "Tracked", icon: TrendingUp },
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/activity", label: "Activity", icon: ActivityIcon },
+  { href: "/assistant", label: "Apex", icon: Bot },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

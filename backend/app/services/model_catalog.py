@@ -192,3 +192,16 @@ def default_model_for(provider: str) -> str:
         if model.get("default"):
             return model["id"]
     raise ValueError(f"No default model configured for provider: {provider}")
+
+
+def tier_for_model(provider: str, model: str) -> Tier:
+    """Looks up a model's cost tier for display alongside an AI action —
+    e.g. the assistant's tool-call proposals (see assistant/models.py's
+    AssistantToolCall.tier). Falls back to "medium" for a model not in the
+    catalog (a hand-typed "Custom model ID…" override, see Settings) —
+    unknown cost is treated as a neutral middle guess rather than either
+    extreme."""
+    for entry in MODEL_CATALOG.get(provider, []):
+        if entry["id"] == model:
+            return entry["tier"]
+    return "medium"

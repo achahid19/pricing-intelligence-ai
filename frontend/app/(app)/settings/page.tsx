@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, cardClassName } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
+import { ContextReviewNotice } from "@/components/ui/context-review-notice";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +22,7 @@ import {
   KNOWN_OBJECTIVES,
   type AiProvider,
   type AiProviderConfig,
+  type ContextReview,
   type ModelCatalog,
   type ModelInfo,
   type Workspace,
@@ -28,7 +30,7 @@ import {
 import { useAiProviderStatus } from "@/lib/aiProvider";
 import { COUNTRIES } from "@/lib/countries";
 import { INDUSTRIES } from "@/lib/industries";
-import { TIER_LABEL, TIER_ORDER } from "@/lib/modelTiers";
+import { TIER_BADGE_CLASS, TIER_LABEL, TIER_ORDER } from "@/lib/modelTiers";
 import { useProductTour } from "@/lib/productTour";
 import { cn } from "@/lib/utils";
 
@@ -48,7 +50,7 @@ function findModel(models: ModelInfo[], id: string | null | undefined): ModelInf
 }
 
 export default function SettingsPage() {
-  const { refresh: refreshAiProviderStatus } = useAiProviderStatus();
+  const { hasActiveProvider, refresh: refreshAiProviderStatus } = useAiProviderStatus();
   const { restart: restartProductTour } = useProductTour();
   const [configs, setConfigs] = useState<AiProviderConfig[] | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
@@ -73,6 +75,11 @@ export default function SettingsPage() {
   const [contextSaving, setContextSaving] = useState(false);
   const [contextError, setContextError] = useState<string | null>(null);
   const [contextSaved, setContextSaved] = useState(false);
+  // A gentle nudge, not a hard gate — see ContextReviewNotice. Re-fetched
+  // (and any prior dismissal cleared) on every trigger, so it re-checks on
+  // each edit rather than going silent forever after one dismissal.
+  const [contextReview, setContextReview] = useState<ContextReview | null>(null);
+  const [contextReviewDismissed, setContextReviewDismissed] = useState(false);
   // A live snapshot of the same three counts Home shows — Settings'
   // own copy already mentions "discovery," "reports," and "catalog
   // assist" without ever linking to any of them; this both orients a
@@ -120,6 +127,19 @@ export default function SettingsPage() {
     setObjectives((prev) => (checked ? [...prev, value] : prev.filter((o) => o !== value)));
   }
 
+  // Best-effort — never blocks or surfaces an error in the surrounding
+  // save flow this is called from. Fired (a) right after the workspace's
+  // first AI key is saved and (b) right after business context is edited.
+  async function runContextReview() {
+    try {
+      const review = await api.workspace.reviewContext();
+      setContextReviewDismissed(false);
+      setContextReview(review.in_scope ? null : review);
+    } catch {
+      // silently skip this pass — the user's save already succeeded
+    }
+  }
+
   async function handleContextSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (objectives.length === 0) {
@@ -149,6 +169,7 @@ export default function SettingsPage() {
       });
       setWorkspace(updated);
       setContextSaved(true);
+      if (hasActiveProvider) runContextReview();
     } catch (err) {
       setContextError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
@@ -209,6 +230,12 @@ export default function SettingsPage() {
       modelOverride = selectedModelId;
     }
 
+    // Captured before the save — this is the "just went from no provider
+    // to having one" transition the context-review nudge is meant for
+    // (see docs/PROJECT.md's trigger (a)); refreshAiProviderStatus() below
+    // updates the shared context's copy of this same fact asynchronously,
+    // so it can't be read again afterward to detect the transition.
+    const hadNoProviderBefore = !hasActiveProvider;
     setError(null);
     setSaved(false);
     setSaving(true);
@@ -227,6 +254,7 @@ export default function SettingsPage() {
       // without this, a page visited before this save would keep showing
       // "set one up" until a full reload.
       refreshAiProviderStatus();
+      if (hadNoProviderBefore) runContextReview();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
@@ -351,7 +379,16 @@ export default function SettingsPage() {
               </p>
             </div>
           ) : (
-            selectedModel && <p className="text-xs text-slate">{selectedModel.blurb}</p>
+            selectedModel && (
+              <div className="flex items-center gap-2">
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${TIER_BADGE_CLASS[selectedModel.tier]}`}
+                >
+                  {TIER_LABEL[selectedModel.tier]}
+                </span>
+                <p className="text-xs text-slate">{selectedModel.blurb}</p>
+              </div>
+            )
           )}
         </div>
 
@@ -460,6 +497,12 @@ export default function SettingsPage() {
 
           {contextError && <p className="text-sm text-danger">{contextError}</p>}
           {contextSaved && !contextError && <p className="text-sm text-good">Saved.</p>}
+          {contextReview?.note && !contextReviewDismissed && (
+            <ContextReviewNotice
+              note={contextReview.note}
+              onDismiss={() => setContextReviewDismissed(true)}
+            />
+          )}
 
           <Button type="submit" disabled={contextSaving} className="w-full">
             {contextSaving ? "Saving…" : "Save business context"}
