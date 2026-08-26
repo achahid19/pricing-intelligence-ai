@@ -124,7 +124,7 @@ export const KNOWN_OBJECTIVES: { value: string; label: string; description: stri
   {
     value: "market_research",
     label: "Market research",
-    description: "See who your competitors are, what they sell, and how they're positioned — no price tracking required.",
+    description: "See who your competitors are, what they sell, and how they're positioned. No price tracking required.",
   },
   {
     value: "price_alignment",

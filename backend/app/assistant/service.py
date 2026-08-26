@@ -381,9 +381,9 @@ async def _get_owned_saved_site(db: AsyncSession, workspace: Workspace, args: di
     result = await db.execute(select(CompetitorSite).where(CompetitorSite.id == site_id, CompetitorSite.workspace_id == workspace.id))
     site = result.scalars().first()
     if site is None:
-        raise ToolValidationError(f"No saved competitor site with id {site_id} was found — look it up with list_saved_competitor_sites first.")
+        raise ToolValidationError(f"No saved competitor site with id {site_id} was found. Look it up with list_saved_competitor_sites first.")
     if site.status != "saved":
-        raise ToolValidationError("That site hasn't been saved yet — it can't be auto-matched until it is.")
+        raise ToolValidationError("That site hasn't been saved yet, it can't be auto-matched until it is.")
     return site
 
 
@@ -403,7 +403,7 @@ async def _check_report_guards(db: AsyncSession, workspace: Workspace) -> None:
     except HTTPException as exc:
         raise ToolValidationError(str(exc.detail)) from exc
     if workspace.pipeline_status == "running":
-        raise ToolValidationError("A report is already being generated for this workspace — check Activity for progress.")
+        raise ToolValidationError("A report is already being generated for this workspace. Check Activity for progress.")
 
 
 async def _validate_generate_report(db: AsyncSession, workspace: Workspace, args: dict) -> dict:
@@ -418,7 +418,7 @@ def _context_changes(args: dict) -> dict:
 async def _validate_update_business_context(db: AsyncSession, workspace: Workspace, args: dict) -> dict:
     changes = _context_changes(args)
     if not changes:
-        raise ToolValidationError("No fields to change were given — pass at least one non-null field.")
+        raise ToolValidationError("No fields to change were given. Pass at least one non-null field.")
     try:
         WorkspaceContextUpdate(**changes)
     except PydanticValidationError as exc:

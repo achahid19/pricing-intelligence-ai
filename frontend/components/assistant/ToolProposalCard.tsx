@@ -69,9 +69,9 @@ export function ToolProposalCard({
               }`}
             >
               {updating ? "Working…" : STATUS_LABEL[status]}
-              {status === "failed" && errorMessage ? ` — ${errorMessage}` : ""}
+              {status === "failed" && errorMessage ? `: ${errorMessage}` : ""}
               {status === "executed" && resultSummary && "note" in resultSummary
-                ? ` — ${String(resultSummary.note)}`
+                ? `: ${String(resultSummary.note)}`
                 : ""}
             </p>
           )}

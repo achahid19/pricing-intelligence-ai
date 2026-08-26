@@ -20,7 +20,7 @@ const POLL_INTERVAL_MS = 15 * 1000;
 const ENTRY_ID = "automated-pipeline";
 
 const LABEL_BY_TRIGGER: Record<string, string> = {
-  onboarding: "Automated setup — competitors, matching & first report",
+  onboarding: "Automated setup: competitors, matching & first report",
   scheduled: "Automated pipeline refresh",
   manual: "Report generation",
 };

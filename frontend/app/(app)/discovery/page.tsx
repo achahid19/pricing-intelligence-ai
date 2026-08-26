@@ -23,7 +23,7 @@ const DISCOVERY_MODES = ["competitor", "reseller"] as const;
 const SITE_VIEWS = ["candidates", "saved", "dismissed"] as const;
 
 const SITE_CONFIDENCE_TOOLTIP =
-  "The AI's own self-assessed confidence based on what it found during research — not a verified or independently calibrated metric.";
+  "The AI's own self-assessed confidence based on what it found during research, not a verified or independently calibrated metric.";
 
 function SiteCard({
   site,
@@ -359,13 +359,13 @@ export default function DiscoveryPage() {
     try {
       const results = await track(
         "discover-all-products",
-        `Discover products — ${sites.length} competitor${sites.length === 1 ? "" : "s"}`,
+        `Discover products (${sites.length} competitor${sites.length === 1 ? "" : "s"})`,
         Promise.allSettled(sites.map((site) => api.discovery.discoverProducts(site.id, 15))),
         { href: "/discovery" }
       );
       const failed = results.filter((r) => r.status === "rejected").length;
       if (failed > 0) {
-        setError(`${sites.length - failed} of ${sites.length} succeeded — ${failed} couldn't run right now (likely still in cooldown). Try those again in a bit.`);
+        setError(`${sites.length - failed} of ${sites.length} succeeded; ${failed} couldn't run right now (likely still in cooldown). Try those again in a bit.`);
       }
     } finally {
       setDiscoveringAllProducts(false);
@@ -419,7 +419,7 @@ export default function DiscoveryPage() {
                 <label htmlFor="max-candidates" className="text-xs font-medium text-slate">
                   {mode === "reseller" ? "Max resellers" : "Max competitors"}
                 </label>
-                <InfoTooltip text="More results found means more AI reasoning and web-search cost on this run — your provider bills for both, so higher isn't free." />
+                <InfoTooltip text="More results found means more AI reasoning and web-search cost on this run; your provider bills for both, so higher isn't free." />
               </div>
               <Input
                 id="max-candidates"
@@ -471,7 +471,7 @@ export default function DiscoveryPage() {
         </div>
       )}
 
-      {running && <p className="mt-4 text-sm text-slate-soft">This can take up to 30 seconds — your AI provider is actively searching the web.</p>}
+      {running && <p className="mt-4 text-sm text-slate-soft">This can take up to 30 seconds; your AI provider is actively searching the web.</p>}
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
       {lastRunNote && <p className="mt-4 text-sm text-slate-soft">{lastRunNote}</p>}
 
@@ -621,8 +621,8 @@ export default function DiscoveryPage() {
             <>
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs text-slate-soft">
-                  A dismissed {mode === "reseller" ? "reseller" : "competitor"} is never re-suggested by discovery —
-                  restore one here if you want it back, or delete it for good.
+                  A dismissed {mode === "reseller" ? "reseller" : "competitor"} is never re-suggested by discovery.
+                  Restore one here if you want it back, or delete it for good.
                 </p>
                 {confirmingDeleteAllDismissed ? (
                   <div className="flex shrink-0 items-center gap-2">

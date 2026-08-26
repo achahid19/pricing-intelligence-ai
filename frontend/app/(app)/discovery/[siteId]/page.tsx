@@ -28,7 +28,7 @@ import { usePersistedTab } from "@/lib/usePersistedTab";
 import { cn } from "@/lib/utils";
 
 const MATCH_CONFIDENCE_TOOLTIP =
-  "The AI's own self-assessed confidence that these are genuinely the same or a directly comparable item — not a verified metric.";
+  "The AI's own self-assessed confidence that these are genuinely the same or a directly comparable item, not a verified metric.";
 // Pre-selects a candidate for one-click bulk confirm rather than
 // auto-confirming it outright — confidence here is self-reported, not
 // verified (a real 85%-confidence match was flatly wrong earlier this
@@ -318,7 +318,7 @@ export default function CompetitorProductsPage() {
     try {
       await track(
         `discover-products-${siteId}`,
-        `Discover products — ${site?.name || site?.domain || "competitor"}`,
+        `Discover products (${site?.name || site?.domain || "competitor"})`,
         api.discovery.discoverProducts(siteId, maxProducts),
         { href: `/discovery/${siteId}` }
       );
@@ -369,7 +369,7 @@ export default function CompetitorProductsPage() {
     try {
       await track(
         `auto-match-${siteId}`,
-        `Auto-match — ${site?.name || site?.domain || "competitor"}`,
+        `Auto-match (${site?.name || site?.domain || "competitor"})`,
         api.discovery.autoMatch(siteId),
         { href: `/discovery/${siteId}` }
       );
@@ -480,7 +480,7 @@ export default function CompetitorProductsPage() {
                   <label htmlFor="max-products" className="text-xs font-medium text-slate">
                     Max products
                   </label>
-                  <InfoTooltip text="More products found means more AI reasoning and web-search cost on this run — your provider bills for both, so higher isn't free." />
+                  <InfoTooltip text="More products found means more AI reasoning and web-search cost on this run; your provider bills for both, so higher isn't free." />
                 </div>
                 <Input
                   id="max-products"
@@ -512,7 +512,7 @@ export default function CompetitorProductsPage() {
 
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
       {discovering && (
-        <p className="mt-4 text-sm text-slate-soft">This can take up to 30 seconds — your AI provider is actively searching the web.</p>
+        <p className="mt-4 text-sm text-slate-soft">This can take up to 30 seconds; your AI provider is actively searching the web.</p>
       )}
 
       {/* Tabs, not always-expanded sections — browsing discovered products,
@@ -545,11 +545,11 @@ export default function CompetitorProductsPage() {
         <div className="mt-6">
           {!products && <p className="text-sm text-slate-soft">Loading…</p>}
           {products && products.length === 0 && (
-            <p className="text-sm text-slate">No products discovered yet — click "Discover products" above.</p>
+            <p className="text-sm text-slate">No products discovered yet. Click "Discover products" above.</p>
           )}
           {products && products.length > 0 && activeProducts.length === 0 && (
             <p className="text-sm text-slate">
-              All discovered products are dismissed — see "Dismissed" below to restore one.
+              All discovered products are dismissed. See "Dismissed" below to restore one.
             </p>
           )}
           {activeProducts.length > 0 && (
@@ -577,8 +577,8 @@ export default function CompetitorProductsPage() {
                       rel="noopener noreferrer"
                       title={
                         p.is_url_verified
-                          ? "Confirmed real page — open to verify"
-                          : "Couldn't confirm this exact page — click to try anyway"
+                          ? "Confirmed real page, open to verify"
+                          : "Couldn't confirm this exact page, click to try anyway"
                       }
                       className="inline-flex items-center gap-1 font-medium text-ink hover:text-accent"
                     >
@@ -612,7 +612,7 @@ export default function CompetitorProductsPage() {
                           onClick={() => handleSetDismissed(p.id, true)}
                           disabled={dismissingId === p.id}
                           aria-label="Dismiss product"
-                          title="Not interested — exclude from matching and reports"
+                          title="Not interested, exclude from matching and reports"
                           className="rounded-md p-1.5 text-slate-soft transition-colors hover:bg-black/[0.03] hover:text-ink"
                         >
                           <EyeOff className="size-4" />
@@ -654,7 +654,7 @@ export default function CompetitorProductsPage() {
                         onClick={() => handleSetDismissed(p.id, false)}
                         disabled={dismissingId === p.id}
                         aria-label="Restore product"
-                        title="Restore — include again in matching and reports"
+                        title="Restore, include again in matching and reports"
                         className="shrink-0 rounded-md p-1.5 text-slate-soft transition-colors hover:bg-accent/10 hover:text-accent"
                       >
                         <RotateCcw className="size-4" />
@@ -735,7 +735,7 @@ export default function CompetitorProductsPage() {
               </div>
             </>
           ) : (
-            <p className="mt-3 text-sm text-slate">No candidates to review — click "Auto-match" above.</p>
+            <p className="mt-3 text-sm text-slate">No candidates to review. Click "Auto-match" above.</p>
           )}
         </div>
       )}

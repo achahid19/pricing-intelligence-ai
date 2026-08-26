@@ -12,7 +12,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             Know your competitors before they know you.
           </p>
           <p className="mt-4 text-sm text-white/60">
-            AI finds and tracks the market around your catalog — bring your own AI provider key, we handle the rest.
+            AI finds and tracks the market around your catalog. Bring your own AI provider key, we handle the rest.
           </p>
         </div>
         <p className="text-xs text-white/40">© 2026 Pricing Intelligence AI</p>

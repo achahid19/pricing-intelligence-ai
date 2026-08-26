@@ -33,7 +33,7 @@ async def save_image(file: UploadFile) -> tuple[str, bytes]:
     if ext is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported image type — use JPEG, PNG, or WebP.",
+            detail="Unsupported image type. Use JPEG, PNG, or WebP.",
         )
 
     content = await file.read()

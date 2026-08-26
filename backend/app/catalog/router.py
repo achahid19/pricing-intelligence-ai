@@ -485,7 +485,7 @@ async def import_products(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not parse file: {exc}")
     if not rows:
-        raise HTTPException(status_code=400, detail="No data rows found — check the column headers")
+        raise HTTPException(status_code=400, detail="No data rows found. Check the column headers")
     if len(rows) > 1000:
         raise HTTPException(status_code=413, detail="Too many rows (max 1000 per import)")
 

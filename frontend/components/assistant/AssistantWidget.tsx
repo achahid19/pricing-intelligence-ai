@@ -115,7 +115,7 @@ export function AssistantWidget() {
             {log.length === 0 && (
               <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-slate-soft">
                 <Bot className="size-7" />
-                <p>Ask about your catalog, competitors, or reports — or ask it to take an action.</p>
+                <p>Ask about your catalog, competitors, or reports, or ask it to take an action.</p>
                 {hasActiveProvider === true && (
                   <div className="flex flex-wrap justify-center gap-2">
                     {STARTER_SUGGESTIONS.map((s) => (

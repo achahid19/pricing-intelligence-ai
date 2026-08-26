@@ -22,13 +22,13 @@ export default function ActivityPage() {
         description={
           runningCount > 0
             ? `${runningCount} action${runningCount === 1 ? "" : "s"} running now, plus anything recently finished.`
-            : "Background actions from this session — discovery runs, matching, reports, and imports."
+            : "Background actions from this session: discovery runs, matching, reports, and imports."
         }
       />
 
       {entries.length === 0 ? (
         <p className="mt-6 text-sm text-slate">
-          Nothing yet — actions you trigger (like running discovery or generating a report) will show up here while
+          Nothing yet. Actions you trigger (like running discovery or generating a report) will show up here while
           they run and for a while after they finish.
         </p>
       ) : (

@@ -28,25 +28,25 @@ export const TOUR_STEPS: TourStep[] = [
   {
     id: "welcome",
     title: "Welcome to Pricing Intelligence AI",
-    body: "60 seconds to show you around — where things live and what runs on its own.",
+    body: "60 seconds to show you around: where things live and what runs on its own.",
   },
   {
     id: "settings",
     target: "nav-settings",
     title: "Add your AI provider key first",
-    body: "Discovery, matching, and reports all depend on it — nothing below actually runs without one configured here.",
+    body: "Discovery, matching, and reports all depend on it. Nothing below actually runs without one configured here.",
   },
   {
     id: "catalog",
     target: "nav-catalog",
     title: "Your catalog",
-    body: "Add your products here first — everything else in the app is built around what's in your catalog.",
+    body: "Add your products here first. Everything else in the app is built around what's in your catalog.",
   },
   {
     id: "discovery",
     target: "nav-discovery",
     title: "Discovery",
-    body: "Finds real competitors using AI web search. The moment you add your first product, this actually runs automatically in the background — no click needed.",
+    body: "Finds real competitors using AI web search. The moment you add your first product, this actually runs automatically in the background, no click needed.",
   },
   {
     id: "tracked",
@@ -58,13 +58,13 @@ export const TOUR_STEPS: TourStep[] = [
     id: "reports",
     target: "nav-reports",
     title: "Reports",
-    body: "AI-written business reports — comparisons, alerts, recommendations. The first one also generates automatically once there's something to report on.",
+    body: "AI-written business reports: comparisons, alerts, recommendations. The first one also generates automatically once there's something to report on.",
   },
   {
     id: "activity",
     target: "nav-activity",
     title: "Activity",
-    body: "Anything running in the background — including that automatic first run — shows up here live, not just the things you click yourself.",
+    body: "Anything running in the background, including that automatic first run, shows up here live, not just the things you click yourself.",
   },
   {
     id: "done",

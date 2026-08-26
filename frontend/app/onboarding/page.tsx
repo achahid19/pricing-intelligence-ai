@@ -50,7 +50,7 @@ export default function OnboardingPage() {
     e.preventDefault();
     setError(null);
     if (objectives.length === 0) {
-      setError("Pick at least one objective — or add your own below.");
+      setError("Pick at least one objective, or add your own below.");
       return;
     }
     if (!country) {
@@ -84,7 +84,7 @@ export default function OnboardingPage() {
         Tell us about your business
       </h1>
       <p className="mt-2 text-sm text-slate">
-        This shapes what the AI looks for and how it reports back — nothing here is locked in, you can change it later in Settings.
+        This shapes what the AI looks for and how it reports back. Nothing here is locked in, you can change it later in Settings.
       </p>
 
       <form onSubmit={handleSubmit} className="mt-8 space-y-6">
@@ -152,7 +152,7 @@ export default function OnboardingPage() {
             placeholder="acme.com"
           />
           <p className="text-xs text-slate-soft">
-            Gives the AI real context about your business — later, this also lets it read your own catalog automatically.
+            Gives the AI real context about your business. Later, this also lets it read your own catalog automatically.
           </p>
         </div>
 

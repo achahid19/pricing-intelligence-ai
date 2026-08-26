@@ -264,7 +264,7 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-10">
-      <PageHeader title="Settings" description="Your AI provider key — used for catalog assist, discovery, and reports." />
+      <PageHeader title="Settings" description="Your AI provider key, used for catalog assist, discovery, and reports." />
 
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate">
         <Link href="/catalog" className="inline-flex items-center gap-1.5 hover:text-accent">
@@ -314,15 +314,15 @@ export default function SettingsPage() {
               return (
                 <option key={p.value} value={p.value}>
                   {p.label}
-                  {hasConfig ? " — configured" : ""}
+                  {hasConfig ? " (configured)" : ""}
                 </option>
               );
             })}
           </Select>
           <p className="text-xs text-slate-soft">
             {configForProvider
-              ? `Already configured${configForProvider.is_active ? " and active" : ""} — change the model below without re-entering your key, or enter a new key to rotate it.`
-              : "Not configured yet — an API key is required."}
+              ? `Already configured${configForProvider.is_active ? " and active" : ""}. Change the model below without re-entering your key, or enter a new key to rotate it.`
+              : "Not configured yet. An API key is required."}
           </p>
         </div>
 
@@ -343,8 +343,8 @@ export default function SettingsPage() {
           <Card className="flex items-start gap-2 p-3 text-xs text-slate">
             <Eye className="mt-0.5 size-3.5 shrink-0 text-accent" />
             <span>
-              This workspace uses AI to describe product photos, so it needs a model that can <strong className="text-ink">see images (multimodal)</strong> —
-              every option below supports that.
+              This workspace uses AI to describe product photos, so it needs a model that can <strong className="text-ink">see images (multimodal)</strong>.
+              Every option below supports that.
             </span>
           </Card>
 
@@ -375,7 +375,7 @@ export default function SettingsPage() {
                 placeholder="e.g. gpt-5.6-luna, or any model this provider serves"
               />
               <p className="text-xs text-slate-soft">
-                Must support image input (multimodal) — photo-assist sends product photos to it and will fail on a text-only model.
+                Must support image input (multimodal); photo-assist sends product photos to it and will fail on a text-only model.
               </p>
             </div>
           ) : (
@@ -404,7 +404,7 @@ export default function SettingsPage() {
       <div>
       <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink">Business context</h2>
       <p className="mt-1 text-sm text-slate">
-        What discovery and reports are built around — set at onboarding, editable any time as your business changes.
+        What discovery and reports are built around, set at onboarding and editable any time as your business changes.
       </p>
 
       {!workspace ? (
@@ -492,7 +492,7 @@ export default function SettingsPage() {
               />
               <span className="text-sm text-ink">Run the full pipeline before each report</span>
             </label>
-            <InfoTooltip text="Before each scheduled report: search for new competitors (auto-saving ones the AI is ≥80% confident about), re-check every saved competitor's products, and re-run matching (auto-confirming matches ≥80% confident, no review step) — so the report reflects a genuinely current picture, not just whatever was last discovered by hand. Adds AI cost and a few extra minutes to the scheduled run." />
+            <InfoTooltip text="Before each scheduled report: search for new competitors (auto-saving ones the AI is ≥80% confident about), re-check every saved competitor's products, and re-run matching (auto-confirming matches ≥80% confident, no review step), so the report reflects a genuinely current picture, not just whatever was last discovered by hand. Adds AI cost and a few extra minutes to the scheduled run." />
           </div>
 
           {contextError && <p className="text-sm text-danger">{contextError}</p>}

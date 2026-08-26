@@ -15,7 +15,7 @@ import { usePersistedTab } from "@/lib/usePersistedTab";
 import { cn } from "@/lib/utils";
 
 const MATCH_CONFIDENCE_TOOLTIP =
-  "The AI's own self-assessed confidence that these are genuinely the same or a directly comparable item — not a verified metric.";
+  "The AI's own self-assessed confidence that these are genuinely the same or a directly comparable item, not a verified metric.";
 
 const VIEW_OPTIONS = ["by-product", "by-competitor"] as const;
 type View = (typeof VIEW_OPTIONS)[number];
@@ -284,7 +284,7 @@ export default function TrackedPage() {
 
       {matches && matches.length === 0 && (
         <p className="mt-6 text-sm text-slate">
-          No confirmed matches yet — confirm a match on a{" "}
+          No confirmed matches yet. Confirm a match on a{" "}
           <Link href="/discovery" className="text-accent hover:underline">
             competitor's product page
           </Link>{" "}

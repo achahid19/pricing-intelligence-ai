@@ -47,7 +47,7 @@ async def create_report(
     if workspace.pipeline_status == "running":
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail="A report is already being generated for this workspace — check Activity for progress.",
+            detail="A report is already being generated for this workspace. Check Activity for progress.",
         )
 
     background_tasks.add_task(reporting_service.run_full_pipeline_background, workspace.id, "manual")

@@ -207,7 +207,7 @@ export default function ReportsPage() {
       // picks this run up within ~15s and links straight to the report
       // once it's actually ready.
       await api.reporting.create();
-      setStartedMessage("Report generation started — check Activity (bell icon) for progress.");
+      setStartedMessage("Report generation started. Check Activity (bell icon) for progress.");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
@@ -265,7 +265,7 @@ export default function ReportsPage() {
     <div className="mx-auto max-w-4xl px-8 py-10">
       <PageHeader
         title="Reports"
-        description="An AI-written summary of your tracked matches — price comparisons, alerts, and recommendations."
+        description="An AI-written summary of your tracked matches: price comparisons, alerts, and recommendations."
         actions={
           <Button onClick={handleGenerate} disabled={generating || hasActiveProvider === false}>
             <Sparkles className="size-4" />
@@ -282,7 +282,7 @@ export default function ReportsPage() {
 
       {reportIntervalHours != null && (
         <p className="mt-2 text-sm text-slate-soft">
-          Next report generates automatically ({reportIntervalHours === 24 ? "Daily" : "Weekly"}) —{" "}
+          Next report generates automatically ({reportIntervalHours === 24 ? "Daily" : "Weekly"}).{" "}
           <Link href="/settings" className="text-accent hover:underline">
             change in Settings →
           </Link>
@@ -335,7 +335,7 @@ export default function ReportsPage() {
 
       {reports && reports.length === 0 && (
         <p className="mt-6 text-sm text-slate">
-          No reports yet — confirm at least one{" "}
+          No reports yet. Confirm at least one{" "}
           <Link href="/discovery" className="text-accent hover:underline">
             priced product match
           </Link>

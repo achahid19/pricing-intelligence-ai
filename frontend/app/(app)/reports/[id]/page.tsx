@@ -152,13 +152,13 @@ function MatchPill({ row }: { row: PriceComparisonRow }) {
   const delta = row.same_currency && row.price_delta_pct != null ? priceDeltaFromPct(row.price_delta_pct) : null;
   const priceColor = delta ? (delta.tone === "good" ? "text-good" : delta.tone === "danger" ? "text-danger" : "text-slate-soft") : "text-slate-soft";
   const titleParts = [
-    delta ? delta.label : row.same_currency ? null : "Different currency — not directly comparable",
+    delta ? delta.label : row.same_currency ? null : "Different currency, not directly comparable",
     row.competitor_product_stock_status ? `Stock: ${row.competitor_product_stock_status}` : null,
   ].filter(Boolean);
 
   return (
     <Link
-      href={`/discovery/${row.competitor_site_id}`}
+      href={`/discovery/${row.competitor_site_id}?q=${encodeURIComponent(row.competitor_product_title)}`}
       title={titleParts.length > 0 ? titleParts.join(" · ") : undefined}
       className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs hover:border-accent"
     >
@@ -436,7 +436,7 @@ export default function ReportDetailPage() {
 
       {report.status === "failed" && (
         <p className="mt-4 text-sm text-danger">
-          The AI summary couldn't be generated ({report.error_message}) — the price comparison below is still accurate.
+          The AI summary couldn't be generated ({report.error_message}). The price comparison below is still accurate.
         </p>
       )}
 
@@ -466,14 +466,14 @@ export default function ReportDetailPage() {
           icon={TrendingUp}
           label="Price increases"
           value={stats.price_increases}
-          tooltip="Competitors whose own price rose since the previous report — not how many are pricier than you right now."
+          tooltip="Competitors whose own price rose since the previous report, not how many are pricier than you right now."
         />
         <StatTile
           icon={TrendingDown}
           label="Price decreases"
           value={stats.price_decreases}
           tone={stats.price_decreases > 0 ? "good" : undefined}
-          tooltip="Competitors whose own price dropped since the previous report. Both tiles read 0 on a workspace's first report — there's no prior price yet to compare against."
+          tooltip="Competitors whose own price dropped since the previous report. Both tiles read 0 on a workspace's first report, since there's no prior price yet to compare against."
         />
       </div>
 
@@ -588,23 +588,23 @@ export default function ReportDetailPage() {
             <p className="mt-2">An alert appears here when:</p>
             <ul className="mt-1 list-disc space-y-1 pl-5">
               <li>
-                <span className="font-medium text-ink">MAP violation</span> — a reseller advertises one of your
+                <span className="font-medium text-ink">MAP violation</span>: a reseller advertises one of your
                 products below the minimum price you've set for it.
               </li>
               <li>
-                <span className="font-medium text-ink">Price anomaly</span> — a tracked competitor's price for a
+                <span className="font-medium text-ink">Price anomaly</span>: a tracked competitor's price for a
                 matched product moves by 15% or more since your previous report.
               </li>
               <li>
-                <span className="font-medium text-ink">New competitor product</span> — a saved competitor's
+                <span className="font-medium text-ink">New competitor product</span>: a saved competitor's
                 catalog gains products it didn't have at your previous report.
               </li>
               <li>
-                <span className="font-medium text-ink">Own price change</span> — one of your own product's
+                <span className="font-medium text-ink">Own price change</span>: one of your own product's
                 prices moves by 15% or more since your previous report.
               </li>
               <li>
-                <span className="font-medium text-ink">Stock status change</span> — a tracked competitor's product
+                <span className="font-medium text-ink">Stock status change</span>: a tracked competitor's product
                 goes from in stock to out of stock, or back, since your previous report.
               </li>
             </ul>

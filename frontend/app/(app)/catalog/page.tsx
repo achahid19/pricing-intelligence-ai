@@ -250,7 +250,7 @@ export default function CatalogPage() {
                             rel="noopener noreferrer"
                             title={
                               p.source_url_verified === false
-                                ? `Unconfirmed — may not be this product's exact page: ${p.source_url}`
+                                ? `Unconfirmed: may not be this product's exact page (${p.source_url})`
                                 : `Open source page: ${p.source_url}`
                             }
                             className="group inline-flex max-w-full items-center gap-1 truncate font-medium text-ink hover:text-accent"

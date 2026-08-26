@@ -45,7 +45,7 @@ export default function AssistantPage() {
     <div className="flex h-[calc(100vh-9rem)] flex-col gap-4 md:h-[calc(100vh-6rem)]">
       <PageHeader
         title="Apex"
-        description="Ask about your workspace, or ask it to take an action — every write action needs your approval first."
+        description="Ask about your workspace, or ask it to take an action. Every write action needs your approval first."
         actions={
           log.length > 0 &&
           (confirmingClear ? (
@@ -81,7 +81,7 @@ export default function AssistantPage() {
         {log.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center text-sm text-slate-soft">
             <Bot className="size-8" />
-            <p>Ask about your catalog, competitors, or reports — or ask it to take an action.</p>
+            <p>Ask about your catalog, competitors, or reports, or ask it to take an action.</p>
             {hasActiveProvider === true && (
               <div className="flex max-w-md flex-wrap justify-center gap-2">
                 {STARTER_SUGGESTIONS.map((s) => (

@@ -11,7 +11,7 @@ export function AiProviderRequiredNotice({ action }: { action: string }) {
     <div className="flex items-start gap-2.5 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 text-sm text-ink">
       <Sparkles className="mt-0.5 size-4 shrink-0 text-accent" />
       <p>
-        {action} needs an AI provider configured first —{" "}
+        {action} needs an AI provider configured first.{" "}
         <Link href="/settings" className="font-medium text-accent hover:underline">
           set one up in Settings
         </Link>

@@ -144,7 +144,7 @@ export function AssistantChatProvider({ children }: { children: React.ReactNode 
           ? `Approved and executed. Result: ${JSON.stringify(call.result_summary)}`
           : call.status === "failed"
             ? `Approved, but it failed: ${call.error_message}`
-            : "Dismissed by the user — not executed.";
+            : "Dismissed by the user, not executed.";
       setMessages((prev) => [...prev, { role: "assistant", content: `(proposed ${call.tool_name}) ${resolutionNote}` }]);
       setTurnCount((c) => c + 1);
     } catch (err) {

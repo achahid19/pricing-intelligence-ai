@@ -272,7 +272,7 @@ export function ProductDialog({ product, onSaved }: ProductDialogProps) {
               placeholder="Leave blank if you don't enforce MAP"
             />
             <p className="text-xs text-slate-soft">
-              The lowest price resellers are allowed to advertise this at — used to flag violations later.
+              The lowest price resellers are allowed to advertise this at, used to flag violations later.
             </p>
           </div>
 

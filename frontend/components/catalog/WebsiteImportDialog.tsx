@@ -61,7 +61,7 @@ export function WebsiteImportDialog({ onImported }: { onImported: () => void }) 
     try {
       const res = await track(
         "website-import-discover",
-        `Scan website for products — ${url.trim() || "your site"}`,
+        `Scan website for products (${url.trim() || "your site"})`,
         api.products.discoverFromWebsite(url.trim() || undefined),
         { href: "/catalog" }
       );
@@ -141,7 +141,7 @@ export function WebsiteImportDialog({ onImported }: { onImported: () => void }) 
         {!result && (
           <>
             <DialogDescription>
-              Your workspace&apos;s active AI provider will browse this site (native web search — the same
+              Your workspace&apos;s active AI provider will browse this site (native web search, the same
               machinery used for competitor discovery) and list the distinct products it finds, with a price. Works
               best on sites where products are server-rendered or search-indexable.
             </DialogDescription>
@@ -174,7 +174,7 @@ export function WebsiteImportDialog({ onImported }: { onImported: () => void }) 
                 const suffix = notes.length ? ` (${notes.join("; ")})` : "";
                 return `Found ${result.candidates.length} product${result.candidates.length === 1 ? "" : "s"} on ${result.domain}${suffix}.`;
               })()}{" "}
-              Review and pick which ones to add — the link icon opens the exact page it was found on, so you can
+              Review and pick which ones to add. The link icon opens the exact page it was found on, so you can
               verify it before importing.
             </DialogDescription>
 
@@ -237,8 +237,8 @@ export function WebsiteImportDialog({ onImported }: { onImported: () => void }) 
                             rel="noopener noreferrer"
                             title={
                               c.url_verified
-                                ? "Confirmed real page — open to verify"
-                                : "Couldn't confirm this exact page — click to try anyway"
+                                ? "Confirmed real page, open to verify"
+                                : "Couldn't confirm this exact page, click to try anyway"
                             }
                             onClick={(e) => e.stopPropagation()}
                             className={`shrink-0 transition-colors hover:text-accent ${
@@ -255,7 +255,7 @@ export function WebsiteImportDialog({ onImported }: { onImported: () => void }) 
                           </p>
                         ) : (
                           <div className="mt-1 flex items-center gap-1.5">
-                            <span className="text-xs text-slate-soft">No price found —</span>
+                            <span className="text-xs text-slate-soft">No price found:</span>
                             <Input
                               type="number"
                               min="0"

@@ -98,7 +98,7 @@ def _header(report: CompetitorReport, workspace: Workspace, s: dict) -> list:
     if report.status == "failed":
         story.append(
             Paragraph(
-                f"The AI summary couldn't be generated ({report.error_message}) — the price comparison below is still accurate.",
+                f"The AI summary couldn't be generated ({report.error_message}). The price comparison below is still accurate.",
                 ParagraphStyle("warn", parent=s["body"], textColor=DANGER),
             )
         )
