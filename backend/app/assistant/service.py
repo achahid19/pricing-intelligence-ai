@@ -30,7 +30,7 @@ from app.catalog import service as catalog_service
 from app.catalog.models import Product
 from app.catalog.schemas import ProductCreate
 from app.discovery import service as discovery_service
-from app.discovery.models import CompetitorSite, DiscoveryRun, ProductMatch
+from app.discovery.models import CompetitorProduct, CompetitorSite, DiscoveryRun, ProductMatch
 from app.discovery.router import DISCOVERY_COOLDOWN_SECONDS
 from app.reporting import service as reporting_service
 from app.reporting.router import REPORT_COOLDOWN_SECONDS
@@ -41,7 +41,14 @@ from app.workspace.schemas import WorkspaceContextUpdate
 
 logger = logging.getLogger(__name__)
 
-READ_TOOL_NAMES = {"get_workspace_summary", "list_catalog_products", "list_saved_competitor_sites"}
+READ_TOOL_NAMES = {
+    "get_workspace_summary",
+    "list_catalog_products",
+    "list_saved_competitor_sites",
+    "list_competitor_products",
+    "list_confirmed_matches",
+    "search_web",
+}
 
 
 class ToolValidationError(Exception):
@@ -115,6 +122,68 @@ _TOOL_DEFS: list[dict] = [
                 }
             },
             "required": ["relationship_type"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "list_competitor_products",
+        "description": (
+            "List discovered products for one saved competitor/reseller site, or across all saved "
+            "sites if site_id is null. Each result has id, title, price, currency, stock status, "
+            "description, and which site it came from. Use this to look up a specific competitor's "
+            "product before comparing it against one of the workspace's own catalog products."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "site_id": {
+                    "type": ["integer", "null"],
+                    "description": "Limit to one saved competitor site's id, from list_saved_competitor_sites. Null for all saved sites.",
+                },
+                "query": {
+                    "type": ["string", "null"],
+                    "description": "Case-insensitive substring to filter product titles by. Null to list all (capped at 50).",
+                },
+            },
+            "required": ["site_id", "query"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "list_confirmed_matches",
+        "description": (
+            "List existing confirmed matches between the workspace's own catalog products and "
+            "competitor products, each with the platform's own AI-assigned confidence score, both "
+            "prices, and which competitor site. Check here first before comparing a pairing from "
+            "scratch, it may already be tracked."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": ["string", "null"],
+                    "description": "Case-insensitive substring to filter by the workspace's own product name. Null to list all (capped at 50).",
+                }
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "search_web",
+        "description": (
+            "Search the web for real, current information not available in the workspace's own data: "
+            "general market context, an industry benchmark, a detail about a competitor not yet "
+            "discovered. Costs a real AI provider web-search call, so prefer the workspace's own data "
+            "(other read tools) first when it can answer the question. Returns a short factual answer "
+            "with sources."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "A specific, well-formed search question."}
+            },
+            "required": ["query"],
             "additionalProperties": False,
         },
     },
@@ -315,6 +384,81 @@ async def _tool_list_saved_competitor_sites(db: AsyncSession, workspace: Workspa
     }
 
 
+async def _tool_list_competitor_products(db: AsyncSession, workspace: Workspace, args: dict) -> dict:
+    query = (
+        select(CompetitorProduct, CompetitorSite)
+        .join(CompetitorSite, CompetitorProduct.competitor_site_id == CompetitorSite.id)
+        .where(
+            CompetitorSite.workspace_id == workspace.id,
+            CompetitorSite.status == "saved",
+            CompetitorProduct.is_dismissed.is_(False),
+        )
+    )
+    site_id = args.get("site_id")
+    if site_id is not None:
+        query = query.where(CompetitorSite.id == int(site_id))
+    q = (args.get("query") or "").strip()
+    if q:
+        query = query.where(CompetitorProduct.title.ilike(f"%{q}%"))
+    result = await db.execute(query.order_by(CompetitorProduct.title).limit(_LIST_PRODUCTS_LIMIT))
+    rows = result.all()
+    return {
+        "products": [
+            {
+                "id": cp.id,
+                "title": cp.title,
+                "price": float(cp.price) if cp.price is not None else None,
+                "currency": cp.currency,
+                "stock_status": cp.stock_status,
+                "description": cp.description,
+                "site_id": site.id,
+                "site_name": site.name or site.domain,
+            }
+            for cp, site in rows
+        ],
+        "shown": len(rows),
+        "capped": len(rows) == _LIST_PRODUCTS_LIMIT,
+    }
+
+
+async def _tool_list_confirmed_matches(db: AsyncSession, workspace: Workspace, args: dict) -> dict:
+    query = (
+        select(ProductMatch, Product, CompetitorProduct, CompetitorSite)
+        .join(Product, ProductMatch.product_id == Product.id)
+        .join(CompetitorProduct, ProductMatch.competitor_product_id == CompetitorProduct.id)
+        .join(CompetitorSite, CompetitorProduct.competitor_site_id == CompetitorSite.id)
+        .where(ProductMatch.workspace_id == workspace.id, ProductMatch.status == "confirmed")
+    )
+    q = (args.get("query") or "").strip()
+    if q:
+        query = query.where(Product.name.ilike(f"%{q}%"))
+    result = await db.execute(query.order_by(Product.name).limit(_LIST_PRODUCTS_LIMIT))
+    rows = result.all()
+    matches = [
+        {
+            "match_id": match.id,
+            "own_product": product.name,
+            "own_price": float(product.price) if product.price is not None else None,
+            "own_currency": product.currency,
+            "competitor_product": cp.title,
+            "competitor_price": float(cp.price) if cp.price is not None else None,
+            "competitor_currency": cp.currency,
+            "competitor_site": site.name or site.domain,
+            "confidence": match.confidence,
+            "match_method": match.match_method,
+        }
+        for match, product, cp, site in rows
+    ]
+    return {"matches": matches, "shown": len(matches), "capped": len(matches) == _LIST_PRODUCTS_LIMIT}
+
+
+async def _tool_search_web(db: AsyncSession, workspace: Workspace, args: dict) -> dict:
+    q = (args.get("query") or "").strip()
+    if not q:
+        return {"error": "query is required."}
+    return await ai_client.run_web_search_query(db, workspace.id, q)
+
+
 def _make_read_tool_executor(db: AsyncSession, workspace: Workspace):
     async def _execute(name: str, args: dict) -> dict:
         if name == "get_workspace_summary":
@@ -323,6 +467,12 @@ def _make_read_tool_executor(db: AsyncSession, workspace: Workspace):
             return await _tool_list_catalog_products(db, workspace, args)
         if name == "list_saved_competitor_sites":
             return await _tool_list_saved_competitor_sites(db, workspace, args)
+        if name == "list_competitor_products":
+            return await _tool_list_competitor_products(db, workspace, args)
+        if name == "list_confirmed_matches":
+            return await _tool_list_confirmed_matches(db, workspace, args)
+        if name == "search_web":
+            return await _tool_search_web(db, workspace, args)
         return {"error": f"Unknown read tool: {name}"}
 
     return _execute

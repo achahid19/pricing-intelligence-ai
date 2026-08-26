@@ -5,7 +5,7 @@ import { Info, Wand2 } from "lucide-react";
 // conversation, so the suggestion pools stay in one place too rather than
 // risking the two surfaces drifting apart.
 
-// Read-only questions the 3 read tools can answer directly — safe to
+// Read-only questions the read tools can answer directly — safe to
 // suggest with no risk of surprising the user with a write proposal.
 export const INFO_SUGGESTIONS = [
   "How many saved competitors do I have?",
@@ -13,6 +13,8 @@ export const INFO_SUGGESTIONS = [
   "Which competitors haven't been auto-matched yet?",
   "When was my last report generated?",
   "What's my current business context?",
+  "Compare one of my products against a competitor's and score how comparable they are",
+  "Search the web for typical pricing in my market",
 ];
 
 // Each of these routes to one of the 5 write tools — always surfaces as a
